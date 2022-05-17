@@ -6,6 +6,8 @@
 #include <boost/shared_ptr.hpp>
 #include <boost/asio.hpp>
 
+#include "common.h"
+
 #define BUFFER_SIZE 20
 
 using boost::asio::ip::udp;
