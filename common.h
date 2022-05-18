@@ -1,6 +1,7 @@
 #ifndef SIK_2022_COMMON_H
 #define SIK_2022_COMMON_H
 
+#include <arpa/inet.h>
 #include <optional>
 #include <vector>
 #include <stdint.h>
@@ -30,13 +31,23 @@ std::optional<uint8_t> parse<uint8_t>(char* *buffer, size_t *bytes_to_read) {
 }
 
 template<>
+std::optional<uint16_t> parse<uint16_t>(char* *buffer, size_t *bytes_to_read) {
+    if (*bytes_to_read < 2)
+        return {};
+    uint8_t result = (uint16_t)(**buffer);
+    *buffer += 2;
+    *bytes_to_read -= 2;
+    return ntohs(result);
+}
+
+template<>
 std::optional<uint32_t> parse<uint32_t>(char* *buffer, size_t *bytes_to_read) {
     if (*bytes_to_read < 4)
         return {};
     uint8_t result = (uint32_t)(**buffer);
     *buffer += 4;
     *bytes_to_read -= 4;
-    return result;
+    return ntohl(result);
 }
 
 template<>
