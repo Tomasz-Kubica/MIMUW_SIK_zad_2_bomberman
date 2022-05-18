@@ -13,6 +13,107 @@
  * TYPES *
  * = = = */
 
+enum Direction {
+    Up = 0,
+    Right = 1,
+    Down = 2,
+    Left = 3
+};
+
+enum ClientMessageType {
+    Join = 0,
+    PlaceBomb = 1,
+    PlaceBlock = 2,
+    Move = 3
+};
+
+struct ClientMessage {
+    ClientMessageType type;
+    union {
+        std::string name;
+        Direction direction;
+    };
+};
+
+typedef uint32_t BombId;
+typedef uint8_t PlayerId;
+typedef uint32_t Score;
+typedef std::pair<uint16_t, uint16_t> Position; // <x, y>
+typedef std::pair<Position, uint16_t> Bomb; // <position, timer>
+typedef std::pair<std::string, std::string> Player; // <name, address>
+
+enum EventType {
+    BombPlaced = 0,
+    BombExploded = 1,
+    PlayerMoved = 2,
+    BlockPlaced = 3
+};
+
+struct Event {
+    EventType type;
+    union {
+        struct {
+            BombId id;
+            Position position;
+        } bomb_placed;
+
+        struct {
+            BombId id;
+            std::vector<PlayerId> robots_destroyed;
+            std::vector<Position> blocks_destroyed;
+        } bomb_exploded;
+
+        struct {
+            PlayerId id;
+            Position position;
+        } player_moved;
+
+        struct {
+            Position position;
+        } block_placed;
+    };
+};
+
+enum ServerMessageType {
+    Hello = 0,
+    AcceptedPlayer = 1,
+    GameStarted = 2,
+    Turn = 3,
+    GameEnded = 4,
+};
+
+struct ServerMessage {
+    ServerMessageType type;
+    union {
+        struct {
+            std::string server_name;
+            uint8_t players_count;
+            uint16_t size_x;
+            uint16_t size_y;
+            uint16_t game_length;
+            uint16_t explosion_radius;
+            uint16_t bomb_timer;
+        } hello;
+
+        struct {
+            PlayerId id;
+            Player player;
+        } accepted_player;
+
+        struct {
+            std::unordered_map<PlayerId, Player> players;
+        } game_started;
+
+        struct {
+            uint16_t turn;
+            std::vector<Event> events;
+        } turn;
+
+        struct {
+            std::unordered_map<PlayerId, Score> scores;
+        } game_ended;
+    };
+};
 
 /* = = = *
  * PARSE *
