@@ -84,37 +84,38 @@ enum ServerMessageType {
     GameEnded = 4,
 };
 
+struct server_message_hello_t {
+    std::string server_name;
+    uint8_t players_count;
+    uint16_t size_x;
+    uint16_t size_y;
+    uint16_t game_length;
+    uint16_t explosion_radius;
+    uint16_t bomb_timer;
+};
+
+struct server_message_accepted_player_t {
+    PlayerId id;
+    Player player;
+};
+
+struct server_message_game_started_t {
+    std::unordered_map<PlayerId, Player> players;
+};
+
+struct server_message_turn_t {
+    uint16_t turn;
+    std::vector<Event> events;
+};
+
+struct server_message_game_ended_t {
+    std::unordered_map<PlayerId, Score> scores;
+};
+
 struct ServerMessage {
     ServerMessageType type;
-    union {
-        struct {
-            std::string server_name;
-            uint8_t players_count;
-            uint16_t size_x;
-            uint16_t size_y;
-            uint16_t game_length;
-            uint16_t explosion_radius;
-            uint16_t bomb_timer;
-        } hello;
-
-        struct {
-            PlayerId id;
-            Player player;
-        } accepted_player;
-
-        struct {
-            std::unordered_map<PlayerId, Player> players;
-        } game_started;
-
-        struct {
-            uint16_t turn;
-            std::vector<Event> events;
-        } turn;
-
-        struct {
-            std::unordered_map<PlayerId, Score> scores;
-        } game_ended;
-    };
+    std::variant<server_message_hello_t, server_message_accepted_player_t, server_message_game_started_t,
+        server_message_turn_t, server_message_game_ended_t> variant;
 };
 
 /* = = = *
@@ -198,6 +199,9 @@ std::optional<ServerMessageType> parse<ServerMessageType>(char* *buffer, size_t 
 
 template<>
 std::optional<Event> parse<Event>(char* *buffer, size_t *bytes_to_read);
+
+template<>
+std::optional<ServerMessage> parse<ServerMessage>(char* *buffer, size_t *bytes_to_read);
 
 /* * * * * * * * * *
  * primitive types *
@@ -358,7 +362,6 @@ std::optional<Event> parse<Event>(char* *buffer, size_t *bytes_to_read) {
             auto position = parse<Position>(buffer, bytes_to_read);
             if (!bomb_id || !position)
                 return {};
-//            return Event({type, event_bomb_placed_t({bomb_id.value(), position.value()})});
             result.variant = event_bomb_placed_t({bomb_id.value(), position.value()});
             break;
         }
@@ -369,14 +372,6 @@ std::optional<Event> parse<Event>(char* *buffer, size_t *bytes_to_read) {
             auto blocks_destroyed = parse<std::vector<Position>>(buffer, bytes_to_read);
             if (!bomb_id || !robots_destroyed || !blocks_destroyed)
                 return {};
-//            return Event({
-//                type,
-//                event_bomb_exploded_t({
-//                    bomb_id.value(),
-//                    robots_destroyed.value(),
-//                    blocks_destroyed.value()
-//                })
-//            });
             result.variant = event_bomb_exploded_t({
                 bomb_id.value(),
                 robots_destroyed.value(),
@@ -390,10 +385,6 @@ std::optional<Event> parse<Event>(char* *buffer, size_t *bytes_to_read) {
             auto position = parse<Position>(buffer, bytes_to_read);
             if (!player_id || !position)
                 return {};
-//            return Event({
-//                type,
-//                event_player_moved_t({player_id.value(), position.value()})
-//            });
             result.variant = event_player_moved_t({player_id.value(), position.value()});
             break;
         }
@@ -402,13 +393,116 @@ std::optional<Event> parse<Event>(char* *buffer, size_t *bytes_to_read) {
             auto position = parse<Position>(buffer, bytes_to_read);
             if (!position)
                 return {};
-//            return Event({type, event_block_placed_t({position.value()})});
             result.variant = event_block_placed_t({position.value()});
             break;
         }
 
             assert(false);
     }
+    return result;
+}
+
+template<>
+std::optional<server_message_hello_t> parse<server_message_hello_t>(char* *buffer, size_t *bytes_to_read) {
+    auto server_name = parse<std::string>(buffer, bytes_to_read);
+    auto player_count = parse<uint8_t>(buffer, bytes_to_read);
+    auto size_x = parse<uint16_t>(buffer, bytes_to_read);
+    auto size_y = parse<uint16_t>(buffer, bytes_to_read);
+    auto game_length = parse<uint16_t>(buffer, bytes_to_read);
+    auto explosion_radius = parse<uint16_t>(buffer, bytes_to_read);
+    auto bomb_timer = parse<uint16_t>(buffer, bytes_to_read);
+    if(!server_name || !player_count || !size_x || !size_y || !game_length || !explosion_radius || !bomb_timer)
+        return {};
+    return server_message_hello_t({ server_name.value(), player_count.value(), size_x.value(), size_y.value(),
+                                    game_length.value(), explosion_radius.value(), bomb_timer.value()});
+}
+
+template<>
+std::optional<server_message_accepted_player_t> parse<server_message_accepted_player_t>(char* *buffer, size_t *bytes_to_read) {
+    auto id = parse<PlayerId>(buffer, bytes_to_read);
+    auto player = parse<Player>(buffer, bytes_to_read);
+    if (!id || !player)
+        return {};
+    return server_message_accepted_player_t({id.value(), player.value()});
+}
+
+template<>
+std::optional<server_message_game_started_t> parse<server_message_game_started_t>(char* *buffer, size_t *bytes_to_read) {
+    auto players = parse<std::unordered_map<PlayerId, Player>>(buffer, bytes_to_read);
+    if (!players)
+        return {};
+    return server_message_game_started_t({players.value()});
+}
+
+template<>
+std::optional<server_message_turn_t> parse<server_message_turn_t>(char* *buffer, size_t *bytes_to_read) {
+    auto turn = parse<uint16_t>(buffer, bytes_to_read);
+    auto events = parse<std::vector<Event>>(buffer, bytes_to_read);
+    if (!turn || !events)
+        return {};
+    return server_message_turn_t({turn.value(), events.value()});
+}
+
+template<>
+std::optional<server_message_game_ended_t> parse<server_message_game_ended_t>(char* *buffer, size_t *bytes_to_read) {
+    auto scores = parse<std::unordered_map<PlayerId, Score>>(buffer, bytes_to_read);
+    if (!scores)
+        return {};
+    return server_message_game_ended_t({scores.value()});
+}
+
+template<>
+std::optional<ServerMessage> parse<ServerMessage>(char* *buffer, size_t *bytes_to_read) {
+    auto type = parse<ServerMessageType>(buffer, bytes_to_read);
+    if (!type)
+        return {};
+    ServerMessage result;
+    result.type = type.value();
+
+    switch (type.value()) {
+        case Hello: {
+            auto hello = parse<server_message_hello_t>(buffer, bytes_to_read);
+            if (!hello)
+                return {};
+            result.variant = hello.value();
+            break;
+        }
+
+        case AcceptedPlayer: {
+            auto accepted_player = parse<server_message_accepted_player_t>(buffer, bytes_to_read);
+            if (!accepted_player)
+                return {};
+            result.variant = accepted_player.value();
+            break;
+        }
+
+        case GameStarted: {
+            auto game_started = parse<server_message_game_started_t>(buffer, bytes_to_read);
+            if (!game_started)
+                return {};
+            result.variant = game_started.value();
+            break;
+        }
+
+        case Turn: {
+            auto turn = parse<server_message_turn_t>(buffer, bytes_to_read);
+            if (!turn)
+                return {};
+            result.variant = turn.value();
+            break;
+        }
+
+        case GameEnded: {
+            auto game_ended = parse<server_message_game_ended_t>(buffer, bytes_to_read);
+            if (!game_ended)
+                return {};
+            result.variant = game_ended.value();
+            break;
+        }
+
+        assert(false);
+    }
+
     return result;
 }
 
