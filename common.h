@@ -8,6 +8,8 @@
 #include <string>
 #include <unordered_map>
 #include <concepts>
+#include <cassert>
+#include <variant>
 
 /* = = = *
  * TYPES *
@@ -49,29 +51,29 @@ enum EventType {
     BlockPlaced = 3
 };
 
+struct event_bomb_placed_t {
+    BombId id;
+    Position position;
+};
+
+struct event_bomb_exploded_t {
+    BombId id;
+    std::vector<PlayerId> robots_destroyed;
+    std::vector<Position> blocks_destroyed;
+};
+
+struct event_player_moved_t {
+    PlayerId id;
+    Position position;
+};
+
+struct event_block_placed_t {
+    Position position;
+};
+
 struct Event {
     EventType type;
-    union {
-        struct {
-            BombId id;
-            Position position;
-        } bomb_placed;
-
-        struct {
-            BombId id;
-            std::vector<PlayerId> robots_destroyed;
-            std::vector<Position> blocks_destroyed;
-        } bomb_exploded;
-
-        struct {
-            PlayerId id;
-            Position position;
-        } player_moved;
-
-        struct {
-            Position position;
-        } block_placed;
-    };
+    std::variant<event_bomb_placed_t, event_bomb_exploded_t, event_player_moved_t, event_block_placed_t> variant;
 };
 
 enum ServerMessageType {
@@ -119,8 +121,87 @@ struct ServerMessage {
  * PARSE *
  * = = = */
 
+/* * * * * * *
+ * concepts  *
+ * * * * * * */
+
+template<typename T>
+concept Pair = requires(T t) {
+    typename T::first_type;
+    typename T::second_type;
+    t.first;
+    t.second;
+    requires std::same_as<decltype(t.first), typename T::first_type>;
+    requires std::same_as<decltype(t.second), typename T::second_type>;
+};
+
+template<typename T>
+concept List = requires(T t, typename T::value_type e, size_t i) {
+    typename T::value_type;
+    t.push_back(e);
+    { t.at(i) } -> std::convertible_to<typename T::value_type>;
+    { t.size() } -> std::same_as<size_t>;
+    requires !std::same_as<T, std::string>; // string hase its own definition of parse
+};
+
+template<typename T>
+concept Map = requires(
+    T t,
+    typename T::value_type e,
+    typename T::mapped_type v,
+    typename T::key_type k
+) {
+    typename T::value_type;
+    typename T::mapped_type;
+    typename T::key_type;
+    typename T::iterator;
+    t.insert(e);
+    { t.size() } -> std::convertible_to<size_t>;
+    { t.begin() } -> std::same_as<typename T::iterator>;
+    { t.end() } -> std::same_as<typename T::iterator>;
+    requires std::same_as<typename T::value_type, std::pair<const typename T::key_type, typename T::mapped_type>>;
+};
+
+/* * * * * * * * *
+ * declarations  *
+ * * * * * * * * */
+
+/* standard library types */
+
 template<typename T>
 std::optional<T> parse(char* *buffer, size_t *bytes_to_read) = delete;
+
+template<Pair T>
+std::optional<T> parse(char* *buffer, size_t *bytes_to_read);
+
+template<List T>
+std::optional<T> parse(char* *buffer, size_t *bytes_to_read);
+
+template<Map T>
+std::optional<T> parse(char* *buffer, size_t *bytes_to_read);
+
+/* enums */
+
+template<>
+std::optional<Direction> parse<Direction>(char* *buffer, size_t *bytes_to_read);
+
+template<>
+std::optional<ClientMessageType> parse<ClientMessageType>(char* *buffer, size_t *bytes_to_read);
+
+template<>
+std::optional<EventType> parse<EventType>(char* *buffer, size_t *bytes_to_read);
+
+template<>
+std::optional<ServerMessageType> parse<ServerMessageType>(char* *buffer, size_t *bytes_to_read);
+
+/* my types */
+
+template<>
+std::optional<Event> parse<Event>(char* *buffer, size_t *bytes_to_read);
+
+/* * * * * * * * * *
+ * primitive types *
+ * * * * * * * * * */
 
 template<>
 std::optional<uint8_t> parse<uint8_t>(char* *buffer, size_t *bytes_to_read) {
@@ -152,6 +233,13 @@ std::optional<uint32_t> parse<uint32_t>(char* *buffer, size_t *bytes_to_read) {
     return ntohl(result);
 }
 
+/* * * * * * * * * * * * * *
+ * standard library types  *
+ * * * * * * * * * * * * * */
+
+
+/* Definitions */
+
 template<>
 std::optional<std::string> parse(char* *buffer, size_t *bytes_to_read) {
     auto size = parse<uint8_t>(buffer, bytes_to_read);
@@ -166,13 +254,6 @@ std::optional<std::string> parse(char* *buffer, size_t *bytes_to_read) {
     return result;
 }
 
-template<typename T>
-concept List = requires(T t, typename T::value_type e, size_t i) {
-    typename T::value_type;
-    t.push_back(e);
-    { t.at(i) } -> std::convertible_to<typename T::value_type>;
-    { t.size() } -> std::same_as<size_t>;
-};
 
 template<List T>
 std::optional<T> parse(char* *buffer, size_t *bytes_to_read) {
@@ -189,24 +270,6 @@ std::optional<T> parse(char* *buffer, size_t *bytes_to_read) {
     }
     return result;
 }
-
-template<typename T>
-concept Map = requires(
-    T t,
-    typename T::value_type e,
-    typename T::mapped_type v,
-    typename T::key_type k
-) {
-    typename T::value_type;
-    typename T::mapped_type;
-    typename T::key_type;
-    typename T::iterator;
-    t.insert(e);
-    { t.size() } -> std::convertible_to<size_t>;
-    { t.begin() } -> std::same_as<typename T::iterator>;
-    { t.end() } -> std::same_as<typename T::iterator>;
-    requires std::same_as<typename T::value_type, std::pair<const typename T::key_type, typename T::mapped_type>>;
-};
 
 template<Map T>
 std::optional<T> parse(char* *buffer, size_t *bytes_to_read) {
@@ -227,15 +290,6 @@ std::optional<T> parse(char* *buffer, size_t *bytes_to_read) {
     return result;
 }
 
-template<typename T>
-concept Pair = requires(T t) {
-    typename T::first_type;
-    typename T::second_type;
-    t.first;
-    t.second;
-    requires std::same_as<decltype(t.first), typename T::first_type>;
-    requires std::same_as<decltype(t.second), typename T::second_type>;
-};
 
 template<Pair T>
 std::optional<T> parse(char* *buffer, size_t *bytes_to_read) {
@@ -248,6 +302,114 @@ std::optional<T> parse(char* *buffer, size_t *bytes_to_read) {
         return result;
     }
     return {};
+}
+
+/* * * * * * *
+ * My types  *
+ * * * * * * */
+
+/* Enums */
+
+template<>
+std::optional<Direction> parse<Direction>(char* *buffer, size_t *bytes_to_read) {
+    auto result = parse<uint8_t>(buffer, bytes_to_read);
+    if (!result.has_value() || result.value() < 4)
+        return {};
+    return Direction(result.value());
+}
+
+template<>
+std::optional<ClientMessageType> parse<ClientMessageType>(char* *buffer, size_t *bytes_to_read) {
+    auto result = parse<uint8_t>(buffer, bytes_to_read);
+    if (!result.has_value() || result.value() < 4)
+        return {};
+    return ClientMessageType(result.value());
+}
+
+template<>
+std::optional<EventType> parse<EventType>(char* *buffer, size_t *bytes_to_read) {
+    auto result = parse<uint8_t>(buffer, bytes_to_read);
+    if (!result.has_value() || result.value() < 4)
+        return {};
+    return EventType(result.value());
+}
+
+template<>
+std::optional<ServerMessageType> parse<ServerMessageType>(char* *buffer, size_t *bytes_to_read) {
+    auto result = parse<uint8_t>(buffer, bytes_to_read);
+    if (!result.has_value() || result.value() < 5)
+        return {};
+    return ServerMessageType(result.value());
+}
+
+/* Structs */
+
+template<>
+std::optional<Event> parse<Event>(char* *buffer, size_t *bytes_to_read) {
+    auto type_option = parse<EventType>(buffer, bytes_to_read);
+    if (!type_option)
+        return {};
+    auto type = type_option.value();
+    Event result;
+    result.type = type;
+    switch (type) {
+        case BombPlaced: {
+            auto bomb_id = parse<BombId>(buffer, bytes_to_read);
+            auto position = parse<Position>(buffer, bytes_to_read);
+            if (!bomb_id || !position)
+                return {};
+//            return Event({type, event_bomb_placed_t({bomb_id.value(), position.value()})});
+            result.variant = event_bomb_placed_t({bomb_id.value(), position.value()});
+            break;
+        }
+
+        case BombExploded: {
+            auto bomb_id = parse<BombId>(buffer, bytes_to_read);
+            auto robots_destroyed = parse<std::vector<PlayerId>>(buffer, bytes_to_read);
+            auto blocks_destroyed = parse<std::vector<Position>>(buffer, bytes_to_read);
+            if (!bomb_id || !robots_destroyed || !blocks_destroyed)
+                return {};
+//            return Event({
+//                type,
+//                event_bomb_exploded_t({
+//                    bomb_id.value(),
+//                    robots_destroyed.value(),
+//                    blocks_destroyed.value()
+//                })
+//            });
+            result.variant = event_bomb_exploded_t({
+                bomb_id.value(),
+                robots_destroyed.value(),
+                blocks_destroyed.value()
+            });
+            break;
+        }
+
+        case PlayerMoved: {
+            auto player_id = parse<PlayerId>(buffer, bytes_to_read);
+            auto position = parse<Position>(buffer, bytes_to_read);
+            if (!player_id || !position)
+                return {};
+//            return Event({
+//                type,
+//                event_player_moved_t({player_id.value(), position.value()})
+//            });
+            result.variant = event_player_moved_t({player_id.value(), position.value()});
+            break;
+        }
+
+        case BlockPlaced: {
+            auto position = parse<Position>(buffer, bytes_to_read);
+            if (!position)
+                return {};
+//            return Event({type, event_block_placed_t({position.value()})});
+            result.variant = event_block_placed_t({position.value()});
+            break;
+        }
+
+            assert(false);
+    }
+    return result;
 }
 
 /* = = = = = *
