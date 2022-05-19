@@ -118,6 +118,17 @@ struct ServerMessage {
         server_message_turn_t, server_message_game_ended_t> variant;
 };
 
+enum InputMessageType {
+    InputPlaceBomb = 0,
+    InputPlaceBlock = 1,
+    InputMove = 2,
+};
+
+struct InputMessage {
+    InputMessageType type;
+    Direction direction; // używane tylko dla typu InputMove
+};
+
 /* = = = *
  * PARSE *
  * = = = */
@@ -195,6 +206,9 @@ std::optional<EventType> parse<EventType>(char* *buffer, size_t *bytes_to_read);
 template<>
 std::optional<ServerMessageType> parse<ServerMessageType>(char* *buffer, size_t *bytes_to_read);
 
+template<>
+std::optional<InputMessageType> parse<InputMessageType>(char* *buffer, size_t *bytes_to_read);
+
 /* my types */
 
 template<>
@@ -202,6 +216,9 @@ std::optional<Event> parse<Event>(char* *buffer, size_t *bytes_to_read);
 
 template<>
 std::optional<ServerMessage> parse<ServerMessage>(char* *buffer, size_t *bytes_to_read);
+
+template<>
+std::optional<InputMessage> parse<InputMessage>(char* *buffer, size_t *bytes_to_read);
 
 /* * * * * * * * * *
  * primitive types *
@@ -344,6 +361,14 @@ std::optional<ServerMessageType> parse<ServerMessageType>(char* *buffer, size_t 
     if (!result.has_value() || result.value() < 5)
         return {};
     return ServerMessageType(result.value());
+}
+
+template<>
+std::optional<InputMessageType> parse<InputMessageType>(char* *buffer, size_t *bytes_to_read) {
+    auto result = parse<uint8_t>(buffer, bytes_to_read);
+    if (!result.has_value() || result.value() < 3)
+        return {};
+    return InputMessageType(result.value());
 }
 
 /* Structs */
@@ -503,6 +528,24 @@ std::optional<ServerMessage> parse<ServerMessage>(char* *buffer, size_t *bytes_t
         assert(false);
     }
 
+    return result;
+}
+
+template<>
+std::optional<InputMessage> parse<InputMessage>(char* *buffer, size_t *bytes_to_read) {
+    auto type = parse<InputMessageType>(buffer, bytes_to_read);
+    if (!type)
+        return {};
+    InputMessage result;
+    result.type = type.value();
+    if (type.value() == InputMove) {
+        auto direction = parse<Direction>(buffer, bytes_to_read);
+        if (!direction)
+            return {};
+        result.direction = direction.value();
+    } else {
+        result.direction = Direction(0); // nie będzie używane, inicjalizacja czymkolwiek
+    }
     return result;
 }
 
