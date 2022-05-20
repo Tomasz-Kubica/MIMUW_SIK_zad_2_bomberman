@@ -127,6 +127,41 @@ struct InputMessage {
     Direction direction; // używane tylko dla typu InputMove
 };
 
+enum class DrawMessageType {
+    Lobby = 0,
+    Game = 1,
+};
+
+struct draw_message_lobby_t {
+    std::string server_name;
+    uint8_t players_count;
+    uint16_t size_x;
+    uint16_t size_y;
+    uint16_t game_length;
+    uint16_t explosion_radius;
+    uint16_t bomb_timer;
+    std::unordered_map<PlayerId, Player> players;
+};
+
+struct draw_message_game_t {
+    std::string server_name;
+    uint16_t size_x;
+    uint16_t size_y;
+    uint16_t game_length;
+    uint16_t turn;
+    std::unordered_map<PlayerId, Player> players;
+    std::unordered_map<PlayerId, Position> player_positions;
+    std::vector<Position> blocks;
+    std::vector<Bomb> bombs;
+    std::vector<Position> explosions;
+    std::unordered_map<PlayerId, Score> scores;
+};
+
+struct DrawMessage {
+    DrawMessageType type;
+    std::variant<draw_message_lobby_t, draw_message_game_t> variant;
+};
+
 /* = = = = = *
  * concepts  *
  * = = = = = */
@@ -171,7 +206,7 @@ concept Map = requires(
 template<typename  T>
 concept MyEnum = requires(T t) {
     requires std::same_as<T, Direction> || std::same_as<T, ClientMessageType> || std::same_as<T, EventType>
-        || std::same_as<T, ServerMessageType> || std::same_as<T, InputMessageType>;
+        || std::same_as<T, ServerMessageType> || std::same_as<T, InputMessageType> || std::same_as<T, DrawMessageType>;
 };
 
 /* = = = *
@@ -579,6 +614,9 @@ bool serialize(T to_serialize, char* *buffer, size_t *bytes_to_write);
 template<>
 bool serialize(ClientMessage to_serialize, char* *buffer, size_t *bytes_to_write);
 
+template<>
+bool serialize(DrawMessage to_serialize, char* *buffer, size_t *bytes_to_write);
+
 /* * * * * * * * * *
  * primitive types *
  * * * * * * * * * */
@@ -687,6 +725,46 @@ bool serialize(ClientMessage to_serialize, char* *buffer, size_t *bytes_to_write
     else if (to_serialize.type == ClientMessageType::Move)
         return serialize(std::get<Direction>(to_serialize.variant), buffer, bytes_to_write);
     return true;
+}
+
+template<>
+bool serialize(draw_message_lobby_t to_serialize, char* *buffer, size_t *bytes_to_write) {
+    return serialize(to_serialize.server_name, buffer, bytes_to_write) &&
+            serialize(to_serialize.players_count, buffer, bytes_to_write) &&
+            serialize(to_serialize.size_x, buffer, bytes_to_write) &&
+            serialize(to_serialize.size_y, buffer, bytes_to_write) &&
+            serialize(to_serialize.game_length, buffer, bytes_to_write) &&
+            serialize(to_serialize.explosion_radius, buffer, bytes_to_write) &&
+            serialize(to_serialize.bomb_timer, buffer, bytes_to_write) &&
+            serialize(to_serialize.players, buffer, bytes_to_write);
+
+}
+
+template<>
+bool serialize(draw_message_game_t to_serialize, char* *buffer, size_t *bytes_to_write) {
+    return serialize(to_serialize.server_name, buffer, bytes_to_write) &&
+            serialize(to_serialize.size_x, buffer, bytes_to_write) &&
+            serialize(to_serialize.size_y, buffer, bytes_to_write) &&
+            serialize(to_serialize.game_length, buffer, bytes_to_write) &&
+            serialize(to_serialize.turn, buffer, bytes_to_write) &&
+            serialize(to_serialize.players, buffer, bytes_to_write) &&
+            serialize(to_serialize.player_positions, buffer, bytes_to_write) &&
+            serialize(to_serialize.blocks, buffer, bytes_to_write) &&
+            serialize(to_serialize.bombs, buffer, bytes_to_write) &&
+            serialize(to_serialize.explosions, buffer, bytes_to_write) &&
+            serialize(to_serialize.scores, buffer, bytes_to_write);
+}
+
+template<>
+bool serialize(DrawMessage to_serialize, char* *buffer, size_t *bytes_to_write) {
+    if (!serialize(to_serialize.type, buffer, bytes_to_write))
+        return false;
+    if (to_serialize.type == DrawMessageType::Lobby)
+        return serialize(std::get<draw_message_lobby_t>(to_serialize.variant), buffer, bytes_to_write);
+    else if (to_serialize.type == DrawMessageType::Game)
+        return serialize(std::get<draw_message_game_t>(to_serialize.variant), buffer, bytes_to_write);
+    assert(false);
+    return false;
 }
 
 #endif //SIK_2022_COMMON_H
