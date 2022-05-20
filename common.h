@@ -10,19 +10,20 @@
 #include <concepts>
 #include <cassert>
 #include <variant>
+#include <cstring>
 
 /* = = = *
  * TYPES *
  * = = = */
 
-enum Direction {
+enum class Direction {
     Up = 0,
     Right = 1,
     Down = 2,
     Left = 3
 };
 
-enum ClientMessageType {
+enum class ClientMessageType {
     Join = 0,
     PlaceBomb = 1,
     PlaceBlock = 2,
@@ -31,10 +32,7 @@ enum ClientMessageType {
 
 struct ClientMessage {
     ClientMessageType type;
-    union {
-        std::string name;
-        Direction direction;
-    };
+    std::variant<std::monostate, std::string, Direction> variant;
 };
 
 typedef uint32_t BombId;
@@ -44,7 +42,7 @@ typedef std::pair<uint16_t, uint16_t> Position; // <x, y>
 typedef std::pair<Position, uint16_t> Bomb; // <position, timer>
 typedef std::pair<std::string, std::string> Player; // <name, address>
 
-enum EventType {
+enum class EventType {
     BombPlaced = 0,
     BombExploded = 1,
     PlayerMoved = 2,
@@ -76,7 +74,7 @@ struct Event {
     std::variant<event_bomb_placed_t, event_bomb_exploded_t, event_player_moved_t, event_block_placed_t> variant;
 };
 
-enum ServerMessageType {
+enum class ServerMessageType {
     Hello = 0,
     AcceptedPlayer = 1,
     GameStarted = 2,
@@ -118,10 +116,10 @@ struct ServerMessage {
         server_message_turn_t, server_message_game_ended_t> variant;
 };
 
-enum InputMessageType {
-    InputPlaceBomb = 0,
-    InputPlaceBlock = 1,
-    InputMove = 2,
+enum class InputMessageType {
+    PlaceBomb = 0,
+    PlaceBlock = 1,
+    Move = 2,
 };
 
 struct InputMessage {
@@ -129,13 +127,9 @@ struct InputMessage {
     Direction direction; // używane tylko dla typu InputMove
 };
 
-/* = = = *
- * PARSE *
- * = = = */
-
-/* * * * * * *
+/* = = = = = *
  * concepts  *
- * * * * * * */
+ * = = = = = */
 
 template<typename T>
 concept Pair = requires(T t) {
@@ -174,14 +168,24 @@ concept Map = requires(
     requires std::same_as<typename T::value_type, std::pair<const typename T::key_type, typename T::mapped_type>>;
 };
 
+template<typename  T>
+concept MyEnum = requires(T t) {
+    requires std::same_as<T, Direction> || std::same_as<T, ClientMessageType> || std::same_as<T, EventType>
+        || std::same_as<T, ServerMessageType> || std::same_as<T, InputMessageType>;
+};
+
+/* = = = *
+ * PARSE *
+ * = = = */
+
 /* * * * * * * * *
  * declarations  *
  * * * * * * * * */
 
-/* standard library types */
-
 template<typename T>
 std::optional<T> parse(char* *buffer, size_t *bytes_to_read) = delete;
+
+/* standard library types */
 
 template<Pair T>
 std::optional<T> parse(char* *buffer, size_t *bytes_to_read);
@@ -257,9 +261,6 @@ std::optional<uint32_t> parse<uint32_t>(char* *buffer, size_t *bytes_to_read) {
 /* * * * * * * * * * * * * *
  * standard library types  *
  * * * * * * * * * * * * * */
-
-
-/* Definitions */
 
 template<>
 std::optional<std::string> parse(char* *buffer, size_t *bytes_to_read) {
@@ -382,7 +383,7 @@ std::optional<Event> parse<Event>(char* *buffer, size_t *bytes_to_read) {
     Event result;
     result.type = type;
     switch (type) {
-        case BombPlaced: {
+        case EventType::BombPlaced: {
             auto bomb_id = parse<BombId>(buffer, bytes_to_read);
             auto position = parse<Position>(buffer, bytes_to_read);
             if (!bomb_id || !position)
@@ -391,7 +392,7 @@ std::optional<Event> parse<Event>(char* *buffer, size_t *bytes_to_read) {
             break;
         }
 
-        case BombExploded: {
+        case EventType::BombExploded: {
             auto bomb_id = parse<BombId>(buffer, bytes_to_read);
             auto robots_destroyed = parse<std::vector<PlayerId>>(buffer, bytes_to_read);
             auto blocks_destroyed = parse<std::vector<Position>>(buffer, bytes_to_read);
@@ -405,7 +406,7 @@ std::optional<Event> parse<Event>(char* *buffer, size_t *bytes_to_read) {
             break;
         }
 
-        case PlayerMoved: {
+        case EventType::PlayerMoved: {
             auto player_id = parse<PlayerId>(buffer, bytes_to_read);
             auto position = parse<Position>(buffer, bytes_to_read);
             if (!player_id || !position)
@@ -414,7 +415,7 @@ std::optional<Event> parse<Event>(char* *buffer, size_t *bytes_to_read) {
             break;
         }
 
-        case BlockPlaced: {
+        case EventType::BlockPlaced: {
             auto position = parse<Position>(buffer, bytes_to_read);
             if (!position)
                 return {};
@@ -485,7 +486,7 @@ std::optional<ServerMessage> parse<ServerMessage>(char* *buffer, size_t *bytes_t
     result.type = type.value();
 
     switch (type.value()) {
-        case Hello: {
+        case ServerMessageType::Hello: {
             auto hello = parse<server_message_hello_t>(buffer, bytes_to_read);
             if (!hello)
                 return {};
@@ -493,7 +494,7 @@ std::optional<ServerMessage> parse<ServerMessage>(char* *buffer, size_t *bytes_t
             break;
         }
 
-        case AcceptedPlayer: {
+        case ServerMessageType::AcceptedPlayer: {
             auto accepted_player = parse<server_message_accepted_player_t>(buffer, bytes_to_read);
             if (!accepted_player)
                 return {};
@@ -501,7 +502,7 @@ std::optional<ServerMessage> parse<ServerMessage>(char* *buffer, size_t *bytes_t
             break;
         }
 
-        case GameStarted: {
+        case ServerMessageType::GameStarted: {
             auto game_started = parse<server_message_game_started_t>(buffer, bytes_to_read);
             if (!game_started)
                 return {};
@@ -509,7 +510,7 @@ std::optional<ServerMessage> parse<ServerMessage>(char* *buffer, size_t *bytes_t
             break;
         }
 
-        case Turn: {
+        case ServerMessageType::Turn: {
             auto turn = parse<server_message_turn_t>(buffer, bytes_to_read);
             if (!turn)
                 return {};
@@ -517,7 +518,7 @@ std::optional<ServerMessage> parse<ServerMessage>(char* *buffer, size_t *bytes_t
             break;
         }
 
-        case GameEnded: {
+        case ServerMessageType::GameEnded: {
             auto game_ended = parse<server_message_game_ended_t>(buffer, bytes_to_read);
             if (!game_ended)
                 return {};
@@ -538,7 +539,7 @@ std::optional<InputMessage> parse<InputMessage>(char* *buffer, size_t *bytes_to_
         return {};
     InputMessage result;
     result.type = type.value();
-    if (type.value() == InputMove) {
+    if (type.value() == InputMessageType::Move) {
         auto direction = parse<Direction>(buffer, bytes_to_read);
         if (!direction)
             return {};
@@ -552,5 +553,140 @@ std::optional<InputMessage> parse<InputMessage>(char* *buffer, size_t *bytes_to_
 /* = = = = = *
  * SERIALIZE *
  * = = = = = */
+
+/* * * * * * * * *
+ * declarations  *
+ * * * * * * * * */
+
+template<typename T>
+bool serialize(T to_serialize, char* *buffer, size_t *bytes_to_write) = delete;
+
+template<Pair T>
+bool serialize(T to_serialize, char* *buffer, size_t *bytes_to_write);
+
+template<List T>
+bool serialize(T to_serialize, char* *buffer, size_t *bytes_to_write);
+
+template<Map T>
+bool serialize(T to_serialize, char* *buffer, size_t *bytes_to_write);
+
+template<>
+bool serialize(Direction to_serialize, char* *buffer, size_t *bytes_to_write);
+
+template<MyEnum T>
+bool serialize(T to_serialize, char* *buffer, size_t *bytes_to_write);
+
+template<>
+bool serialize(ClientMessage to_serialize, char* *buffer, size_t *bytes_to_write);
+
+/* * * * * * * * * *
+ * primitive types *
+ * * * * * * * * * */
+
+template<>
+bool serialize(uint8_t to_serialize, char* *buffer, size_t *bytes_to_write) {
+    if (*bytes_to_write < 1)
+        return false;
+    *(uint8_t*)(*buffer) = to_serialize;
+    *buffer += 1;
+    *bytes_to_write -= 1;
+    return true;
+}
+
+template<>
+bool serialize(uint16_t to_serialize, char* *buffer, size_t *bytes_to_write) {
+    if (*bytes_to_write < 2)
+        return false;
+    *(uint16_t*)(*buffer) = htons(to_serialize);
+    *buffer += 2;
+    *bytes_to_write -= 2;
+    return true;
+}
+
+template<>
+bool serialize(uint32_t to_serialize, char* *buffer, size_t *bytes_to_write) {
+    if (*bytes_to_write < 4)
+        return false;
+    *(uint32_t*)(*buffer) = htonl(to_serialize);
+    *buffer += 4;
+    *bytes_to_write -= 4;
+    return true;
+}
+
+/* * * * * * * * * * * * * *
+ * standard library types  *
+ * * * * * * * * * * * * * */
+
+template<>
+bool serialize(std::string to_serialize, char* *buffer, size_t *bytes_to_write) {
+    uint32_t size = (uint32_t)to_serialize.size();
+    auto success = serialize(size, buffer, bytes_to_write);
+    if (!success || *bytes_to_write < size)
+        return false;
+    memcpy(*buffer, to_serialize.c_str(), size);
+    *buffer += size;
+    bytes_to_write -= size;
+    return true;
+}
+
+template<Pair T>
+bool serialize(T to_serialize, char* *buffer, size_t *bytes_to_write) {
+    return serialize(to_serialize.first, buffer, bytes_to_write)
+        && serialize(to_serialize.second, buffer, bytes_to_write);
+}
+
+template<List T>
+bool serialize(T to_serialize, char* *buffer, size_t *bytes_to_write) {
+    uint32_t size = (uint32_t)to_serialize.size();
+    auto success = serialize(size, buffer, bytes_to_write);
+    if (!success)
+        return false;
+    for (uint32_t i = 0; i < size; i++) {
+        if (!serialize((typename T::value_type)to_serialize.at(i), buffer, bytes_to_write))
+            return false;
+    }
+    return true;
+}
+
+template<Map T>
+bool serialize(T to_serialize, char* *buffer, size_t *bytes_to_write) {
+    uint32_t size = (uint32_t)to_serialize.size();
+    auto success = serialize(size, buffer, bytes_to_write);
+    if (!success)
+        return false;
+    for (auto it = to_serialize.begin(); it != to_serialize.end(); it++) {
+        if (!serialize((typename T::key_type)(it->first), buffer, bytes_to_write))
+            return false;
+        if (!serialize((typename T::mapped_type)(it->second), buffer, bytes_to_write))
+            return false;
+    }
+    return true;
+}
+
+/* * * * * * *
+ * My types  *
+ * * * * * * */
+
+/* Enums */
+
+template<MyEnum T>
+bool serialize(T to_serialize, char* *buffer, size_t *bytes_to_write) {
+    uint8_t as_number = static_cast<uint8_t>(to_serialize);
+    serialize(as_number, buffer, bytes_to_write);
+    return true;
+}
+
+/* Structs */
+
+template<>
+bool serialize(ClientMessage to_serialize, char* *buffer, size_t *bytes_to_write) {
+    if (!serialize(to_serialize.type, buffer, bytes_to_write))
+        return false;
+    if (to_serialize.type == ClientMessageType::Join)
+        return serialize(std::get<std::string>(to_serialize.variant), buffer, bytes_to_write);
+    else if (to_serialize.type == ClientMessageType::Move)
+        return serialize(std::get<Direction>(to_serialize.variant), buffer, bytes_to_write);
+    return true;
+}
 
 #endif //SIK_2022_COMMON_H
