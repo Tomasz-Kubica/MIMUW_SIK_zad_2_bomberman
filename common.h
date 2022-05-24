@@ -301,6 +301,8 @@ std::optional<uint32_t> parse<uint32_t>(char* *buffer, size_t *bytes_to_read) {
     auto result = *(uint32_t*)*buffer;
     *buffer += 4;
     *bytes_to_read -= 4;
+
+    std::cout << "uin32_t: [" << (int)ntohl(result) << "] ";
     return ntohl(result);
 }
 
@@ -599,6 +601,7 @@ std::optional<ServerMessage> parse<ServerMessage>(char* *buffer, size_t *bytes_t
         assert(false);
     }
 
+    std::cout << std::endl;
     return result;
 }
 
@@ -692,7 +695,7 @@ bool serialize(uint32_t to_serialize, char* *buffer, size_t *bytes_to_write) {
 
 template<>
 bool serialize(std::string to_serialize, char* *buffer, size_t *bytes_to_write) {
-    auto size = (uint32_t)to_serialize.size();
+    auto size = (uint8_t)to_serialize.size();
     auto success = serialize(size, buffer, bytes_to_write);
     if (!success || *bytes_to_write < size)
         return false;
