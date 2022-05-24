@@ -4,7 +4,7 @@
 #include <arpa/inet.h>
 #include <optional>
 #include <vector>
-#include <stdint.h>
+#include <cstdint>
 #include <string>
 #include <unordered_map>
 #include <concepts>
@@ -217,6 +217,9 @@ concept MyEnum = requires(T t) {
  * declarations  *
  * * * * * * * * */
 
+/* Parsuje obiekt typu T.
+ * Jeżeli parsowanie zakończyło się niepowodzeniem i bytes_to_read = 0,
+ * to jedynym powodem niepowodzenia była zbyt mała ilość danych */
 template<typename T>
 std::optional<T> parse(char* *buffer, size_t *bytes_to_read) = delete;
 
@@ -270,23 +273,31 @@ std::optional<uint8_t> parse<uint8_t>(char* *buffer, size_t *bytes_to_read) {
     auto result = *(uint8_t*)*buffer;
     *buffer += 1;
     *bytes_to_read -= 1;
+
+    std::cout << "uin8_t: [" << (int)result << "] ";
     return result;
 }
 
 template<>
 std::optional<uint16_t> parse<uint16_t>(char* *buffer, size_t *bytes_to_read) {
-    if (*bytes_to_read < 2)
+    if (*bytes_to_read < 2) {
+        *bytes_to_read = 0;
         return {};
+    }
     auto result = *(uint16_t*)*buffer;
     *buffer += 2;
     *bytes_to_read -= 2;
+
+    std::cout << "uin16_t: [" << (int)ntohs(result) << "] ";
     return ntohs(result);
 }
 
 template<>
 std::optional<uint32_t> parse<uint32_t>(char* *buffer, size_t *bytes_to_read) {
-    if (*bytes_to_read < 4)
+    if (*bytes_to_read < 4) {
+        *bytes_to_read = 0;
         return {};
+    }
     auto result = *(uint32_t*)*buffer;
     *buffer += 4;
     *bytes_to_read -= 4;
@@ -303,11 +314,15 @@ std::optional<std::string> parse(char* *buffer, size_t *bytes_to_read) {
     if (!size)
         return {};
     auto size_value = size.value();
-    if (*bytes_to_read < size_value)
+    if (*bytes_to_read < size_value) {
+        *bytes_to_read = 0;
         return {}; // not enough bytes left
+    }
     std::string result(*buffer, size_value);
     *buffer += size_value;
     *bytes_to_read -= size_value;
+
+    std::cout << "string: [" << result << "] ";
     return result;
 }
 
@@ -370,40 +385,60 @@ std::optional<T> parse(char* *buffer, size_t *bytes_to_read) {
 template<>
 std::optional<Direction> parse<Direction>(char* *buffer, size_t *bytes_to_read) {
     auto result = parse<uint8_t>(buffer, bytes_to_read);
-    if (!result.has_value() || result.value() < 4)
+    if (!result.has_value())
         return {};
+    else if (result.value() > 4) {
+        *bytes_to_read = std::max(*bytes_to_read, (size_t)1);
+        return {};
+    }
     return Direction(result.value());
 }
 
 template<>
 std::optional<ClientMessageType> parse<ClientMessageType>(char* *buffer, size_t *bytes_to_read) {
     auto result = parse<uint8_t>(buffer, bytes_to_read);
-    if (!result.has_value() || result.value() < 4)
+    if (!result.has_value())
         return {};
+    else if (result.value() > 4) {
+        *bytes_to_read = std::max(*bytes_to_read, (size_t)1);
+        return {};
+    }
     return ClientMessageType(result.value());
 }
 
 template<>
 std::optional<EventType> parse<EventType>(char* *buffer, size_t *bytes_to_read) {
     auto result = parse<uint8_t>(buffer, bytes_to_read);
-    if (!result.has_value() || result.value() < 4)
+    if (!result.has_value())
         return {};
+    else if (result.value() > 4) {
+        *bytes_to_read = std::max(*bytes_to_read, (size_t)1);
+        return {};
+    }
     return EventType(result.value());
 }
 
 template<>
 std::optional<ServerMessageType> parse<ServerMessageType>(char* *buffer, size_t *bytes_to_read) {
     auto result = parse<uint8_t>(buffer, bytes_to_read);
-    if (!result.has_value() || result.value() < 5)
+    if (!result.has_value())
         return {};
+    else if (result.value() > 5) {
+        *bytes_to_read = std::max(*bytes_to_read, (size_t)1);
+        return {};
+    }
     return ServerMessageType(result.value());
 }
 
 template<>
 std::optional<InputMessageType> parse<InputMessageType>(char* *buffer, size_t *bytes_to_read) {
     auto result = parse<uint8_t>(buffer, bytes_to_read);
-    if (!result.has_value() || result.value() < 3)
+    if (!result.has_value())
         return {};
+    else if (result.value() > 3) {
+        *bytes_to_read = std::max(*bytes_to_read, (size_t)1);
+        return {};
+    }
     return InputMessageType(result.value());
 }
 
@@ -657,13 +692,13 @@ bool serialize(uint32_t to_serialize, char* *buffer, size_t *bytes_to_write) {
 
 template<>
 bool serialize(std::string to_serialize, char* *buffer, size_t *bytes_to_write) {
-    uint32_t size = (uint32_t)to_serialize.size();
+    auto size = (uint32_t)to_serialize.size();
     auto success = serialize(size, buffer, bytes_to_write);
     if (!success || *bytes_to_write < size)
         return false;
     memcpy(*buffer, to_serialize.c_str(), size);
     *buffer += size;
-    bytes_to_write -= size;
+    *bytes_to_write -= size;
     return true;
 }
 
@@ -675,7 +710,7 @@ bool serialize(T to_serialize, char* *buffer, size_t *bytes_to_write) {
 
 template<List T>
 bool serialize(T to_serialize, char* *buffer, size_t *bytes_to_write) {
-    uint32_t size = (uint32_t)to_serialize.size();
+    auto size = (uint32_t)to_serialize.size();
     auto success = serialize(size, buffer, bytes_to_write);
     if (!success)
         return false;
@@ -688,7 +723,7 @@ bool serialize(T to_serialize, char* *buffer, size_t *bytes_to_write) {
 
 template<Map T>
 bool serialize(T to_serialize, char* *buffer, size_t *bytes_to_write) {
-    uint32_t size = (uint32_t)to_serialize.size();
+    auto size = (uint32_t)to_serialize.size();
     auto success = serialize(size, buffer, bytes_to_write);
     if (!success)
         return false;
@@ -709,7 +744,7 @@ bool serialize(T to_serialize, char* *buffer, size_t *bytes_to_write) {
 
 template<MyEnum T>
 bool serialize(T to_serialize, char* *buffer, size_t *bytes_to_write) {
-    uint8_t as_number = static_cast<uint8_t>(to_serialize);
+    auto as_number = static_cast<uint8_t>(to_serialize);
     serialize(as_number, buffer, bytes_to_write);
     return true;
 }
