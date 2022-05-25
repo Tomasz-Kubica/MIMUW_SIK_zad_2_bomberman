@@ -274,7 +274,6 @@ std::optional<uint8_t> parse<uint8_t>(char* *buffer, size_t *bytes_to_read) {
     *buffer += 1;
     *bytes_to_read -= 1;
 
-    std::cout << "uin8_t: [" << (int)result << "] ";
     return result;
 }
 
@@ -288,7 +287,6 @@ std::optional<uint16_t> parse<uint16_t>(char* *buffer, size_t *bytes_to_read) {
     *buffer += 2;
     *bytes_to_read -= 2;
 
-    std::cout << "uin16_t: [" << (int)ntohs(result) << "] ";
     return ntohs(result);
 }
 
@@ -302,7 +300,6 @@ std::optional<uint32_t> parse<uint32_t>(char* *buffer, size_t *bytes_to_read) {
     *buffer += 4;
     *bytes_to_read -= 4;
 
-    std::cout << "uin32_t: [" << (int)ntohl(result) << "] ";
     return ntohl(result);
 }
 
@@ -324,7 +321,6 @@ std::optional<std::string> parse(char* *buffer, size_t *bytes_to_read) {
     *buffer += size_value;
     *bytes_to_read -= size_value;
 
-    std::cout << "string: [" << result << "] ";
     return result;
 }
 
@@ -601,7 +597,6 @@ std::optional<ServerMessage> parse<ServerMessage>(char* *buffer, size_t *bytes_t
         assert(false);
     }
 
-    std::cout << std::endl;
     return result;
 }
 

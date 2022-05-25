@@ -8,7 +8,7 @@
 
 #include "common.h"
 
-#define BUFFER_SIZE 200
+#define BUFFER_SIZE 80000
 
 using boost::asio::ip::udp;
 using boost::asio::ip::tcp;
@@ -17,6 +17,10 @@ namespace p_opt = boost::program_options;
 
 std::pair<std::string, std::string> split_address(std::string address) {
     size_t poss_to_split = address.find(':');
+    if (poss_to_split >= address.size()) {
+        std::cout << "Incorrect address (" << address << ") format, use format: <(host name):(port) lub (IPv4):(port) lub (IPv6):(port)>" << std::endl;
+        exit(1);
+    }
     auto ip = address.substr(0, poss_to_split);
     auto port = address.substr(poss_to_split + 1);
     return {ip, port};
@@ -80,22 +84,22 @@ public:
             : gui_socket_(io_context, udp::endpoint(udp::v6(), receive_gui_port)), server_socket_(io_context),
               udp_resolver_(io_context), gui_address_(gui_address), gui_port_(gui_port), player_name(player_name) {
 
+        std::cerr << "start connecting to server\n";
+        tcp::resolver resolver(io_context);
+        tcp::resolver::results_type server_endpoints;
         try {
-
-
-            std::cerr << "start connecting to server\n";
-            tcp::resolver resolver(io_context);
-            boost::system::error_code ignored_error;
-            tcp::resolver::results_type server_endpoints = resolver.resolve(server_address, server_port);
+            server_endpoints = resolver.resolve(server_address, server_port);
             std::cerr << "endpoints found\n";
+        } catch (std::exception& e) {
+            std::cerr << "Error: resolving server address failed" << std::endl;
+            exit(1);
+        }
+        try {
             boost::asio::connect(server_socket_, server_endpoints);
             std::cerr << "connected to server\n";
-
-        }
-        catch (std::exception& e)
-        {
-            std::cerr << "\ncaught exception: " << e.what() << std::endl;
-            return;
+        } catch (std::exception& e) {
+            std::cerr << "Error: connecting to server failed" << std::endl;
+            exit(1);
         }
 
         start_receive_from_gui();
@@ -122,7 +126,8 @@ private:
     void handle_receive_from_gui(const boost::system::error_code &error,
                                  std::size_t bytes_transferred) {
         if (!error) {
-            std::cout << "received bytes: " << bytes_transferred << "\n";
+            std::cerr << "message from gui received" << std::endl;
+//            std::cout << "received bytes: " << bytes_transferred << "\n";
 
             auto bytes_left = bytes_transferred;
             char *buff_to_read = gui_recv_buffer_.c_array();
@@ -130,10 +135,11 @@ private:
             if (received_message) {
                 // after receiving anny correct message try joining if not in game
                 client_game_info_mutex.lock();
-                if (client_game_info.hello_received && !client_game_info.join_sent) {
+                if (client_game_info.hello_received && !client_game_info.game_started) {
                     client_game_info.join_sent = true;
                     client_game_info_mutex.unlock();
-                    // TODO handle errors
+
+                    std::cerr << "sending join" << std::endl;
                     char buff[BUFFER_SIZE];
                     char *buff_ptr = buff;
                     size_t buff_size = BUFFER_SIZE;
@@ -141,12 +147,15 @@ private:
                         ClientMessageType::Join,
                         player_name
                     }), &buff_ptr, &buff_size));
-                    for (size_t i = 0; i < BUFFER_SIZE - buff_size; i++) {
-                        std::cerr << (int)buff[i] << " | ";
+                    try {
+                        boost::asio::write(server_socket_,boost::asio::buffer(buff, BUFFER_SIZE - buff_size));
+                    } catch (std::exception& e) {
+                            // error sending to server
+                            std::cerr << "Error: sending message to server failed" << std::endl;
+                            exit(1);
                     }
-                    std::cerr << std::endl;
-                    auto sent = boost::asio::write(server_socket_, boost::asio::buffer(buff, BUFFER_SIZE - buff_size));
-                    std::cout << "sent " << (int)sent << "/" << (int)(BUFFER_SIZE - buff_size) << " bytes\n";
+                    start_receive_from_gui();
+                    return;
                 } else {
                     client_game_info_mutex.unlock();
                 }
@@ -161,20 +170,20 @@ private:
             }
             start_receive_from_gui();
         } else {
-            // TODO: handle error
+            std::cerr << "Error: receiving message from gui failed" << std::endl;
+            exit(1);
         }
     }
 
     void handle_receive_from_server(const boost::system::error_code &error,
                                     std::size_t bytes_transferred) {
-        // TODO: handle receive error
-
-        std::cout << "bytes received from server: " << bytes_transferred << "\n";
-        char* print_buff = server_recv_buffer_.c_array();
-        for (size_t i = 0; i < bytes_transferred; i++) {
-            std::cout << (int)*(print_buff + i) << " ";
+        if (error == boost::asio::error::eof) {
+            std::cerr << "Error: connection with server closed" << std::endl;
+            exit(1);
+        } else if (error) {
+            std::cerr << "Error: receiving message from server failed" << std::endl;
+            exit(1);
         }
-        std::cout << "\n";
 
         server_saved_buffer_ += std::string(server_recv_buffer_.c_array(), bytes_transferred);
 
@@ -185,12 +194,10 @@ private:
             std::cout << std::endl;
             if (!server_message && bytes_to_read == 0) {
                 // Part of the message hasn't been received yet, waiting for the rest of it
-                std::cout << "Not enough bytes received\n";
                 break;
             } else if (!server_message) {
                 // Message was incorrect, disconnect
-                std::cout << "incorrect message\n";
-                // TODO
+                std::cerr << "Error: incorrect message from server" << std::endl;
                 exit(1);
             }
             // Correct message
@@ -206,9 +213,36 @@ private:
                      const boost::system::error_code & /*error*/,
                      std::size_t /*bytes_transferred*/) {}
 
+    // lock client_game_info before calling this method
+    void send_lobby_message() {
+        DrawMessage to_send = {
+                DrawMessageType::Lobby,
+                draw_message_lobby_t {
+                        client_game_info.server_name,
+                        client_game_info.player_count,
+                        client_game_info.size_x,
+                        client_game_info.size_y,
+                        client_game_info.game_length,
+                        client_game_info.explosion_radius,
+                        client_game_info.bomb_timer,
+                        client_game_info.players
+                }
+        };
+
+        char send_buffer[BUFFER_SIZE];
+        char *write_ptr = send_buffer;
+        size_t bytes_to_write = BUFFER_SIZE;
+        assert(serialize(to_send, &write_ptr, &bytes_to_write));
+
+//                std::cerr << "gui address and port: " << gui_address_ << " " << gui_port_ << std::endl;
+        auto endpoint = *udp_resolver_.resolve(udp::v6(), gui_address_, gui_port_).begin();
+        gui_socket_.send_to(boost::asio::buffer(send_buffer, BUFFER_SIZE - bytes_to_write), endpoint);
+    }
+
     void process_server_message(const ServerMessage &message) {
         const std::lock_guard<std::mutex> client_game_info_lock(client_game_info_mutex);
         if (message.type == ServerMessageType::Hello && !client_game_info.hello_received) {
+            std::cerr << "hello received" << std::endl;
             auto hello = get<server_message_hello_t>(message.variant);
             client_game_info.hello_received = true;
             client_game_info.server_name = hello.server_name;
@@ -218,6 +252,8 @@ private:
             client_game_info.game_length = hello.game_length;
             client_game_info.explosion_radius = hello.explosion_radius;
             client_game_info.bomb_timer = hello.bomb_timer;
+
+//            send_lobby_message();
             return;
 
         } else if (message.type == ServerMessageType::Hello || !client_game_info.hello_received)
@@ -225,37 +261,19 @@ private:
 
         switch (message.type) {
             case ServerMessageType::AcceptedPlayer: {
+                std::cerr << "accepted player received" << std::endl;
                 auto accepted_player = get<server_message_accepted_player_t>(message.variant);
                 client_game_info.players.insert({accepted_player.id, accepted_player.player});
 
                 // Send lobby message to gui
-                DrawMessage to_send = {
-                        DrawMessageType::Lobby,
-                        draw_message_lobby_t {
-                            client_game_info.server_name,
-                            client_game_info.player_count,
-                            client_game_info.size_x,
-                            client_game_info.size_y,
-                            client_game_info.game_length,
-                            client_game_info.explosion_radius,
-                            client_game_info.bomb_timer,
-                            client_game_info.players
-                        }
-                };
-
-                char send_buffer[BUFFER_SIZE];
-                char *write_ptr = send_buffer;
-                size_t bytes_to_write = BUFFER_SIZE;
-                assert(serialize(to_send, &write_ptr, &bytes_to_write));
-
-                std::cerr << "gui address and port: " << gui_address_ << " " << gui_port_ << std::endl;
-                auto endpoint = *udp_resolver_.resolve(udp::v6(), gui_address_, gui_port_).begin();
-                gui_socket_.send_to(boost::asio::buffer(send_buffer, BUFFER_SIZE - bytes_to_write), endpoint);
+                send_lobby_message();
 
                 break;
             }
 
             case ServerMessageType::GameStarted: {
+                std::cerr << "game started received" << std::endl;
+
                 auto game_started = get<server_message_game_started_t>(message.variant);
                 client_game_info.game_started = true;
                 client_game_info.players = move(game_started.players);
@@ -267,6 +285,8 @@ private:
             }
 
             case ServerMessageType::Turn: {
+                std::cerr << "turn received" << std::endl;
+
                 std::vector<Position> explosions;
                 std::set<PlayerId> destroyed_players;
 
@@ -313,7 +333,27 @@ private:
                         case EventType::BombExploded: {
                             auto event_desc = get<event_bomb_exploded_t>(event.variant);
                             if (client_game_info.bombs.contains(event_desc.id)) {
-                                explosions.push_back(client_game_info.bombs[event_desc.id].first);
+                                auto center = client_game_info.bombs[event_desc.id].first;
+                                explosions.push_back(center);
+                                std::vector<std::pair<int, int>> directions = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+                                for (auto &direction : directions) {
+                                    for (int i = 1; i <= client_game_info.explosion_radius; i++) {
+                                        Position new_explosion = {center.first + direction.first * i, center.second + direction.second * i};
+                                        if (new_explosion.first >= client_game_info.size_x || new_explosion.second >= client_game_info.size_y) {
+                                            break;
+                                        }
+                                        explosions.push_back(new_explosion);
+                                        bool block_destroyed = false;
+                                        for (auto &block : client_game_info.blocks) {
+                                            if (block == new_explosion) {
+                                                block_destroyed = true;
+                                                break;
+                                            }
+                                        }
+                                        if (block_destroyed)
+                                            break;
+                                    }
+                                }
                                 client_game_info.bombs.erase(event_desc.id);
                             } // else unknown bomb, position unknown
                             for (auto &destroyed_block : event_desc.blocks_destroyed) {
@@ -361,15 +401,22 @@ private:
 
                 auto endpoint = *udp_resolver_.resolve(udp::v6(), gui_address_, gui_port_).begin();
                 auto sent = gui_socket_.send_to(boost::asio::buffer(send_buffer, BUFFER_SIZE - bytes_to_write), endpoint);
-                std::cout << "sent " << (int)sent << "/" << (int)(BUFFER_SIZE - bytes_to_write) << " bytes\n";
+//                std::cout << "sent " << (int)sent << "/" << (int)(BUFFER_SIZE - bytes_to_write) << " bytes\n";
 
                 break;
             }
 
             case ServerMessageType::GameEnded: {
+                std::cerr << "game ended received" << std::endl;
+
                 auto game_ended = get<server_message_game_ended_t>(message.variant);
                 client_game_info.game_started = false; // game ended waiting for the next one
                 client_game_info.join_sent = false;
+                client_game_info.players = {};
+                client_game_info.player_positions = {};
+                client_game_info.scores = {};
+                client_game_info.bombs = {};
+                client_game_info.blocks = {};
                 break;
             }
 
@@ -401,93 +448,6 @@ private:
 char buff[100];
 
 int main(int argc, char *argv[]) {
-    /*const auto x = Direction(1);
-    static_assert(x == Direction::Right);
-
-
-    size_t bytes = 4;
-    buff[0] = 1;
-    buff[1] = 1;
-    buff[2] = 0;
-    buff[3] = 7;
-    char* buff_ptr = buff;
-
-    auto parsed_position = parse<Position>(&buff_ptr, &bytes);
-    assert(parsed_position);
-    std::cout << (int)parsed_position.value().first << " " << (int)parsed_position.value().second << "\n";
-
-
-    bytes = 7;
-    buff[0] = 0;
-    buff[1] = 0;
-    buff[2] = 0;
-    buff[3] = 3;
-    buff[4] = 4;
-    buff[5] = 2;
-    buff[6] = 0;
-    buff_ptr = buff;
-
-    auto list = parse<std::vector<uint8_t>>(&buff_ptr, &bytes);
-    assert(list);
-    auto list_val = list.value();
-    for (size_t i = 0; i < list_val.size(); i++) {
-      std::cout << (int)list_val.at(i) << " ";
-    }
-    std::cout << "\n";
-
-    bytes = 8;
-    buff[0] = 0;
-    buff[1] = 0;
-    buff[2] = 0;
-    buff[3] = 2;
-    buff[4] = 4;
-    buff[5] = 2;
-    buff[6] = 3;
-    buff[7] = 6;
-    buff_ptr = buff;
-
-    auto map = parse<std::unordered_map<uint8_t, uint8_t>>(&buff_ptr, &bytes);
-    assert(map);
-    auto map_val = map.value();
-    for (auto it = map_val.begin(); it != map_val.end(); it++) {
-      std::cout << "[" << (int)it->first << " : " << (int)it->second << "] ";
-    }
-    std::cout << "\n";
-
-    bytes = 5;
-    buff[0] = 2;
-    buff[1] = 1;
-    buff[2] = 2;
-    buff[3] = 3;
-    buff[4] = 4;
-
-    buff_ptr = buff;
-    auto pair = parse<std::pair<std::string , uint8_t>>(&buff_ptr, &bytes);
-    bytes = 5;
-    buff_ptr = buff;
-    static_assert(Pair<std::pair<uint8_t, uint8_t>>);
-
-    auto pair_vector = parse<std::vector<std::vector<std::string>>>(&buff_ptr, &bytes);
-    auto pair_vector2 = parse<std::vector<std::pair<uint8_t , uint8_t>>>(&buff_ptr, &bytes);
-    auto pair_vector3 = parse<std::unordered_map<uint8_t, std::pair<uint8_t , uint8_t>>>(&buff_ptr, &bytes);
-    auto pair_pair = parse<std::pair<std::vector<uint8_t>, std::pair<uint8_t, uint8_t>>>(&buff_ptr, &bytes);
-    auto event = parse<Event>(&buff_ptr, &bytes);
-    auto server_message = parse<ServerMessage>(&buff_ptr, &bytes);
-
-    serialize(std::vector<std::pair<std::unordered_map<uint8_t, Direction>, std::string>>(), &buff_ptr, &bytes);
-
-    buff_ptr = buff;
-    bytes = 100;
-    ClientMessage clientMessage({ClientMessageType::Join, std::string("ala ma kota")});
-    assert(serialize(clientMessage, &buff_ptr, &bytes));
-
-    buff_ptr = buff;
-    bytes = 100;
-    DrawMessage drawMessage({DrawMessageType::Lobby, draw_message_lobby_t()});
-    assert(serialize(drawMessage, &buff_ptr, &bytes));
-
-    return 0;*/
-
     std::string player_name;
     std::string gui_address;
     std::string server_address;
@@ -516,29 +476,23 @@ int main(int argc, char *argv[]) {
         std::cout << "No gui address\n";
         return 1;
     }
-    std::cout << "gui address: " << gui_address << "\n";
 
     if (var_map.count("port") == 0) {
         std::cout << "No gui port\n";
         return 1;
     }
-    std::cout << "port: " << port << "\n";
 
     if (var_map.count("server-address") == 0) {
         std::cout << "No server address\n";
         return 1;
     }
-    std::cout << "server address: " << server_address << "\n";
-
 
     if (var_map.count("player-name") == 0) {
         std::cout << "No player name\n";
         return 1;
     }
-    std::cout << "player-name: " << player_name << "\n";
 
     boost::asio::io_context io_context;
-    /// TODO: check if address format is correct
     auto split_server_address = split_address(server_address);
     auto split_gui_address = split_address(gui_address);
     client_server client_server(io_context, port,
