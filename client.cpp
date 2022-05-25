@@ -15,10 +15,11 @@ using boost::asio::ip::tcp;
 
 namespace p_opt = boost::program_options;
 
-std::pair<std::string, std::string> split_address(std::string address) {
+std::pair<std::string, std::string> split_address(const std::string &address) {
     size_t poss_to_split = address.find_last_of(':');
     if (poss_to_split == std::string::npos) {
-        std::cout << "Incorrect address (" << address << ") format, use format: <(host name):(port) lub (IPv4):(port) lub (IPv6):(port)>" << std::endl;
+        std::cout << "Incorrect address (" << address
+                  << ") format, use format: <(host name):(port) lub (IPv4):(port) lub (IPv6):(port)>" << std::endl;
         exit(1);
     }
     auto ip = address.substr(0, poss_to_split);
@@ -65,8 +66,8 @@ ClientMessage client_message_from_input_message(const InputMessage &input_messag
             return ClientMessage({ClientMessageType::Move, input_message.direction});
         }
     }
-    std::cerr << "client_message_from_input_message impossible input_message type" << std::endl;
-    assert(false);
+    std::cerr << "Error: client_message_from_input_message impossible input_message type" << std::endl;
+    exit(1);
 }
 
 template<typename T>
@@ -79,32 +80,29 @@ void remove_from_vector(std::vector<T> &vec, const T &to_remove) {
 
 class client_server {
 public:
-    client_server(boost::asio::io_context &io_context, uint16_t receive_gui_port, const std::string &server_address, const std::string &server_port,
-                    const std::string &gui_address, const std::string &gui_port, const std::string &player_name)
+    client_server(boost::asio::io_context &io_context, uint16_t receive_gui_port, const std::string &server_address,
+                  const std::string &server_port,
+                  const std::string &gui_address, const std::string &gui_port, const std::string &player_name)
             : gui_socket_(io_context, udp::endpoint(udp::v6(), receive_gui_port)), server_socket_(io_context),
               udp_resolver_(io_context), gui_address_(gui_address), gui_port_(gui_port), player_name(player_name) {
 
-        std::cerr << "start connecting to server\n";
         tcp::resolver resolver(io_context);
         tcp::resolver::results_type server_endpoints;
         try {
             // try finding ip v4 endpoint
             server_endpoints = resolver.resolve(tcp::v4(), server_address, server_port);
-            std::cerr << "endpoints found\n";
-        } catch (std::exception& e) {
+        } catch (std::exception &e) {
             try {
                 // try finding ip v6 endpoint
                 server_endpoints = resolver.resolve(tcp::v6(), server_address, server_port);
-                std::cerr << "endpoints found\n";
-            } catch (std::exception& e) {
+            } catch (std::exception &e) {
                 std::cerr << "Error: resolving server address failed" << std::endl;
                 exit(1);
             }
         }
         try {
             boost::asio::connect(server_socket_, server_endpoints);
-            std::cerr << "connected to server\n";
-        } catch (std::exception& e) {
+        } catch (std::exception &e) {
             std::cerr << "Error: connecting to server failed" << std::endl;
             exit(1);
         }
@@ -112,12 +110,12 @@ public:
         try {
             // try resolving as ip v4
             gui_endpoint_ = *udp_resolver_.resolve(udp::v4(), gui_address_, gui_port_).begin();
-        } catch (std::exception& e) {
+        } catch (std::exception &e) {
             try {
                 // try resolving as ip v6
                 gui_endpoint_ = *udp_resolver_.resolve(udp::v6(), gui_address_, gui_port_).begin();
-            } catch (std::exception& e) {
-                std::cerr << "Error: resolving udp address failed" << std::endl;
+            } catch (std::exception &e) {
+                std::cerr << "Error: resolving gui address failed" << std::endl;
                 exit(1);
             }
         }
@@ -142,22 +140,21 @@ private:
         server_socket_.async_receive(
                 boost::asio::buffer(server_recv_buffer_),
                 boost::bind(&client_server::handle_receive_from_server, this,
-                             boost::asio::placeholders::error,
-                             boost::asio::placeholders::bytes_transferred));
+                            boost::asio::placeholders::error,
+                            boost::asio::placeholders::bytes_transferred));
     }
 
     void send_join() {
-        std::cerr << "sending join" << std::endl;
         char buff[BUFFER_SIZE];
         char *buff_ptr = buff;
         size_t buff_size = BUFFER_SIZE;
         assert(serialize(ClientMessage({
-            ClientMessageType::Join,
-            player_name
-        }), &buff_ptr, &buff_size));
+                                               ClientMessageType::Join,
+                                               player_name
+                                       }), &buff_ptr, &buff_size));
         try {
-            boost::asio::write(server_socket_,boost::asio::buffer(buff, BUFFER_SIZE - buff_size));
-        } catch (std::exception& e) {
+            boost::asio::write(server_socket_, boost::asio::buffer(buff, BUFFER_SIZE - buff_size));
+        } catch (std::exception &e) {
             // error sending to server
             std::cerr << "Error: sending message to server failed" << std::endl;
             exit(1);
@@ -167,9 +164,6 @@ private:
     void handle_receive_from_gui(const boost::system::error_code &error,
                                  std::size_t bytes_transferred) {
         if (!error) {
-            std::cerr << "message from gui received" << std::endl;
-//            std::cout << "received bytes: " << bytes_transferred << "\n";
-
             auto bytes_left = bytes_transferred;
             char *buff_to_read = gui_recv_buffer_.c_array();
             auto received_message = parse<InputMessage>(&buff_to_read, &bytes_left);
@@ -177,7 +171,6 @@ private:
                 // after receiving anny correct message try joining if not in game
                 client_game_info_mutex.lock();
                 if (client_game_info.hello_received && !client_game_info.game_started) {
-//                    client_game_info.join_sent = true;
                     client_game_info_mutex.unlock();
 
                     send_join();
@@ -217,9 +210,8 @@ private:
 
         while (!server_saved_buffer_.empty()) {
             char *buff = server_saved_buffer_.data();
-            auto bytes_to_read = (size_t)server_saved_buffer_.size();
+            auto bytes_to_read = (size_t) server_saved_buffer_.size();
             auto server_message = parse<ServerMessage>(&buff, &bytes_to_read);
-            std::cout << std::endl;
             if (!server_message && bytes_to_read == 0) {
                 // Part of the message hasn't been received yet, waiting for the rest of it
                 break;
@@ -229,7 +221,7 @@ private:
                 exit(1);
             }
             // Correct message
-            auto parsed_size = (size_t)(buff - server_saved_buffer_.data());
+            auto parsed_size = (size_t) (buff - server_saved_buffer_.data());
             server_saved_buffer_.erase(0, parsed_size);
             process_server_message(server_message.value());
         }
@@ -245,7 +237,7 @@ private:
     void send_lobby_message() {
         DrawMessage to_send = {
                 DrawMessageType::Lobby,
-                draw_message_lobby_t {
+                draw_message_lobby_t{
                         client_game_info.server_name,
                         client_game_info.player_count,
                         client_game_info.size_x,
@@ -262,13 +254,10 @@ private:
         size_t bytes_to_write = BUFFER_SIZE;
         assert(serialize(to_send, &write_ptr, &bytes_to_write));
 
-//                std::cerr << "gui address and port: " << gui_address_ << " " << gui_port_ << std::endl;
-
         try {
-            auto endpoint = *udp_resolver_.resolve(/*udp::v4(), */gui_address_, gui_port_/*, boost::asio::ip::resolver_base::numeric_service*/).begin();
-            gui_socket_.send_to(boost::asio::buffer(send_buffer, BUFFER_SIZE - bytes_to_write), endpoint);
-        } catch (std::exception& e) {
-            std::cerr << "sending lobby err\n" << e.what() << std::endl;
+            gui_socket_.send_to(boost::asio::buffer(send_buffer, BUFFER_SIZE - bytes_to_write), gui_remote_endpoint_);
+        } catch (std::exception &e) {
+            std::cerr << "Error: sending message to gui failed" << std::endl;
         }
     }
 
@@ -284,7 +273,6 @@ private:
     void process_server_message(const ServerMessage &message) {
         const std::lock_guard<std::mutex> client_game_info_lock(client_game_info_mutex);
         if (message.type == ServerMessageType::Hello && !client_game_info.hello_received) {
-            std::cerr << "hello received" << std::endl;
             auto hello = get<server_message_hello_t>(message.variant);
             client_game_info.hello_received = true;
             client_game_info.server_name = hello.server_name;
@@ -296,7 +284,6 @@ private:
             client_game_info.bomb_timer = hello.bomb_timer;
 
             send_lobby_message();
-//            send_join();
             return;
 
         } else if (message.type == ServerMessageType::Hello || !client_game_info.hello_received)
@@ -304,7 +291,6 @@ private:
 
         switch (message.type) {
             case ServerMessageType::AcceptedPlayer: {
-                std::cerr << "accepted player received" << std::endl;
                 auto accepted_player = get<server_message_accepted_player_t>(message.variant);
                 client_game_info.players.insert({accepted_player.id, accepted_player.player});
 
@@ -315,12 +301,10 @@ private:
             }
 
             case ServerMessageType::GameStarted: {
-                std::cerr << "game started received" << std::endl;
-
                 auto game_started = get<server_message_game_started_t>(message.variant);
                 client_game_info.game_started = true;
                 client_game_info.players = move(game_started.players);
-                for (auto &player : client_game_info.players) {
+                for (auto &player: client_game_info.players) {
                     client_game_info.player_positions.insert({player.first, {0, 0}});
                     client_game_info.scores.insert({player.first, 0});
                 }
@@ -328,8 +312,6 @@ private:
             }
 
             case ServerMessageType::Turn: {
-                std::cerr << "turn received" << std::endl;
-
                 std::set<Position> explosions;
                 std::set<PlayerId> destroyed_players;
                 std::set<Position> destroyed_blocks;
@@ -338,16 +320,17 @@ private:
 
                 // before processing events
                 client_game_info.turn = turn.turn;
-                for (auto &bomb : client_game_info.bombs) {
+                for (auto &bomb: client_game_info.bombs) {
                     bomb.second.second -= 1; // tick bomb timer
                 }
 
                 // processing events
-                for (auto &event : turn.events) {
+                for (auto &event: turn.events) {
                     switch (event.type) {
                         case EventType::BlockPlaced: {
                             auto event_desc = get<event_block_placed_t>(event.variant);
-                            if (std::find(client_game_info.blocks.begin(), client_game_info.blocks.end(), event_desc.position) == client_game_info.blocks.end())
+                            if (std::find(client_game_info.blocks.begin(), client_game_info.blocks.end(),
+                                          event_desc.position) == client_game_info.blocks.end())
                                 client_game_info.blocks.push_back(event_desc.position);
                             break;
                         }
@@ -368,9 +351,7 @@ private:
                             auto event_desc = get<event_player_moved_t>(event.variant);
                             if (client_game_info.player_positions.contains(event_desc.id))
                                 client_game_info.player_positions[event_desc.id] = event_desc.position;
-                            else {
-                                std::cerr << "\nWarning move of unknown player" << std::endl;
-                            }
+                            // else: move of unknown player, do nothing
                             break;
                         }
 
@@ -379,7 +360,6 @@ private:
                             if (client_game_info.bombs.contains(event_desc.id)) {
                                 auto center = client_game_info.bombs[event_desc.id].first;
                                 explosions.insert(center);
-
 
 
                                 if (!check_if_block_on_position(center)) {
@@ -403,11 +383,11 @@ private:
                                 }
                                 client_game_info.bombs.erase(event_desc.id);
                             } // else unknown bomb, position unknown
-                            for (auto &destroyed_block : event_desc.blocks_destroyed) {
+                            for (auto &destroyed_block: event_desc.blocks_destroyed) {
 //                                remove_from_vector(client_game_info.blocks, destroyed_block);
                                 destroyed_blocks.insert(destroyed_block);
                             }
-                            for (auto &destroyed_player : event_desc.robots_destroyed) {
+                            for (auto &destroyed_player: event_desc.robots_destroyed) {
                                 destroyed_players.insert(destroyed_player);
                             }
                             break;
@@ -417,48 +397,34 @@ private:
 
                 }
                 // after processing all events
-                for (auto &increase_score : destroyed_players) {
-//                    std::cout << "[sc: " << (int)increase_score << "], ";
+                for (auto &increase_score: destroyed_players) {
                     client_game_info.scores[increase_score] += 1;
                 }
-//                std::cout << std::endl;
                 //remove destroyed blocks
-                for (auto &block : destroyed_blocks) {
+                for (auto &block: destroyed_blocks) {
                     remove_from_vector(client_game_info.blocks, block);
                 }
 
                 std::vector<Bomb> bomb_vector;
-                for (auto &bomb : client_game_info.bombs) {
+                for (auto &bomb: client_game_info.bombs) {
                     bomb_vector.push_back(bomb.second);
                 }
-
-                std::cout << "sent to gui: \n";
-                for (auto &block: client_game_info.blocks) {
-                    std::cout << "  block: " << block.first << " " << block.second << '\n';
-                }
-                for (auto &bomb: client_game_info.bombs) {
-                    std::cout << "  bomb: " << bomb.second.first.first << " " << bomb.second.first.second << '\n';
-                }
-                for (auto &explosion: explosions) {
-                    std::cout << "  explosion: " << explosion.first << " " << explosion.second << '\n';
-                }
-
 
                 DrawMessage to_send = {
                         DrawMessageType::Game,
                         draw_message_game_t({
-                            client_game_info.server_name,
-                            client_game_info.size_x,
-                            client_game_info.size_y,
-                            client_game_info.game_length,
-                            client_game_info.turn,
-                            client_game_info.players,
-                            client_game_info.player_positions,
-                            client_game_info.blocks,
-                            bomb_vector,
-                            std::vector<Position>(explosions.begin(), explosions.end()),
-                            client_game_info.scores,
-                        })
+                                                    client_game_info.server_name,
+                                                    client_game_info.size_x,
+                                                    client_game_info.size_y,
+                                                    client_game_info.game_length,
+                                                    client_game_info.turn,
+                                                    client_game_info.players,
+                                                    client_game_info.player_positions,
+                                                    client_game_info.blocks,
+                                                    bomb_vector,
+                                                    std::vector<Position>(explosions.begin(), explosions.end()),
+                                                    client_game_info.scores,
+                                            })
                 };
 
                 char send_buffer[BUFFER_SIZE];
@@ -468,17 +434,16 @@ private:
 
 
                 try {
-                    auto endpoint = *udp_resolver_.resolve(/*udp::v6(),*/ gui_address_, gui_port_/*,  boost::asio::ip::resolver_base::all_matching*/).begin();
+                    auto endpoint = *udp_resolver_.resolve(/*udp::v6(),*/ gui_address_,
+                                                                          gui_port_/*,  boost::asio::ip::resolver_base::all_matching*/).begin();
                     gui_socket_.send_to(boost::asio::buffer(send_buffer, BUFFER_SIZE - bytes_to_write), endpoint);
-                } catch (std::exception& e) {
-                    std::cerr << "sending game err\n" << e.what() << std::endl;
+                } catch (std::exception &e) {
+                    std::cerr << "Error: sending message to gui failed" << std::endl;
                 }
                 break;
             }
 
             case ServerMessageType::GameEnded: {
-                std::cerr << "game ended received" << std::endl;
-
                 auto game_ended = get<server_message_game_ended_t>(message.variant);
                 client_game_info.game_started = false; // game ended waiting for the next one
 //                client_game_info.join_sent = false;
@@ -493,7 +458,6 @@ private:
             }
 
             case ServerMessageType::Hello: {
-                std::cerr << "switch reached Hello" << std::endl;
                 assert(false);
                 break;
             }
