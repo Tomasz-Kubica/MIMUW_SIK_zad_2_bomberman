@@ -434,9 +434,7 @@ private:
 
 
                 try {
-                    auto endpoint = *udp_resolver_.resolve(/*udp::v6(),*/ gui_address_,
-                                                                          gui_port_/*,  boost::asio::ip::resolver_base::all_matching*/).begin();
-                    gui_socket_.send_to(boost::asio::buffer(send_buffer, BUFFER_SIZE - bytes_to_write), endpoint);
+                    gui_socket_.send_to(boost::asio::buffer(send_buffer, BUFFER_SIZE - bytes_to_write), gui_endpoint_);
                 } catch (std::exception &e) {
                     std::cerr << "Error: sending message to gui failed" << std::endl;
                 }
@@ -513,7 +511,6 @@ int main(int argc, char *argv[]) {
         std::cout << "No gui address\n";
         return 1;
     }
-    std::cout << gui_address << "\n";
 
     if (var_map.count("port") == 0) {
         std::cout << "No gui port\n";
@@ -524,7 +521,6 @@ int main(int argc, char *argv[]) {
         std::cout << "No server address\n";
         return 1;
     }
-    std::cout << server_address << "\n";
 
     if (var_map.count("player-name") == 0) {
         std::cout << "No player name\n";
