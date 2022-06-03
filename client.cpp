@@ -90,34 +90,16 @@ public:
         tcp::resolver::results_type server_endpoints;
         try {
             // try finding ip v4 endpoint
-            server_endpoints = resolver.resolve(tcp::v4(), server_address, server_port);
+            server_endpoints = resolver.resolve(server_address, server_port);
         } catch (std::exception &e) {
-            try {
-                // try finding ip v6 endpoint
-                server_endpoints = resolver.resolve(tcp::v6(), server_address, server_port);
-            } catch (std::exception &e) {
-                std::cerr << "Error: resolving server address failed" << std::endl;
-                exit(1);
-            }
+            std::cerr << "Error: resolving server address failed" << std::endl;
+            exit(1);
         }
         try {
             boost::asio::connect(server_socket_, server_endpoints);
         } catch (std::exception &e) {
             std::cerr << "Error: connecting to server failed" << std::endl;
             exit(1);
-        }
-
-        try {
-            // try resolving as ip v4
-            gui_endpoint_ = *udp_resolver_.resolve(udp::v4(), gui_address_, gui_port_).begin();
-        } catch (std::exception &e) {
-            try {
-                // try resolving as ip v6
-                gui_endpoint_ = *udp_resolver_.resolve(udp::v6(), gui_address_, gui_port_).begin();
-            } catch (std::exception &e) {
-                std::cerr << "Error: resolving gui address failed" << std::endl;
-                exit(1);
-            }
         }
 
         boost::asio::ip::tcp::no_delay no_delay_option(true);
@@ -255,7 +237,8 @@ private:
         assert(serialize(to_send, &write_ptr, &bytes_to_write));
 
         try {
-            gui_socket_.send_to(boost::asio::buffer(send_buffer, BUFFER_SIZE - bytes_to_write), gui_remote_endpoint_);
+            auto endpoint = *udp_resolver_.resolve(gui_address_, gui_port_).begin();
+            gui_socket_.send_to(boost::asio::buffer(send_buffer, BUFFER_SIZE - bytes_to_write), endpoint);
         } catch (std::exception &e) {
             std::cerr << "Error: sending message to gui failed" << std::endl;
         }
@@ -384,7 +367,6 @@ private:
                                 client_game_info.bombs.erase(event_desc.id);
                             } // else unknown bomb, position unknown
                             for (auto &destroyed_block: event_desc.blocks_destroyed) {
-//                                remove_from_vector(client_game_info.blocks, destroyed_block);
                                 destroyed_blocks.insert(destroyed_block);
                             }
                             for (auto &destroyed_player: event_desc.robots_destroyed) {
@@ -434,7 +416,8 @@ private:
 
 
                 try {
-                    gui_socket_.send_to(boost::asio::buffer(send_buffer, BUFFER_SIZE - bytes_to_write), gui_endpoint_);
+                    auto endpoint = *udp_resolver_.resolve(gui_address_, gui_port_).begin();
+                    gui_socket_.send_to(boost::asio::buffer(send_buffer, BUFFER_SIZE - bytes_to_write), endpoint);
                 } catch (std::exception &e) {
                     std::cerr << "Error: sending message to gui failed" << std::endl;
                 }
@@ -444,7 +427,6 @@ private:
             case ServerMessageType::GameEnded: {
                 auto game_ended = get<server_message_game_ended_t>(message.variant);
                 client_game_info.game_started = false; // game ended waiting for the next one
-//                client_game_info.join_sent = false;
                 client_game_info.players = {};
                 client_game_info.player_positions = {};
                 client_game_info.scores = {};
@@ -464,7 +446,6 @@ private:
 
     udp::resolver udp_resolver_;
     std::string gui_address_;
-    boost::asio::ip::basic_resolver_entry<udp> gui_endpoint_;
     std::string gui_port_;
     udp::socket gui_socket_;
     udp::endpoint gui_remote_endpoint_;
@@ -479,8 +460,6 @@ private:
 
     std::string player_name;
 };
-
-char buff[100];
 
 int main(int argc, char *argv[]) {
     std::string player_name;
