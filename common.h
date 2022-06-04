@@ -263,6 +263,9 @@ std::optional<ServerMessage> parse<ServerMessage>(char **buffer, size_t *bytes_t
 template<>
 std::optional<InputMessage> parse<InputMessage>(char **buffer, size_t *bytes_to_read);
 
+template<>
+std::optional<ClientMessage> parse<ClientMessage>(char **buffer, size_t *bytes_to_read);
+
 /* * * * * * * * * *
  * primitive types *
  * * * * * * * * * */
@@ -621,6 +624,29 @@ std::optional<InputMessage> parse<InputMessage>(char **buffer, size_t *bytes_to_
     return result;
 }
 
+template<>
+std::optional<ClientMessage> parse<ClientMessage>(char **buffer, size_t *bytes_to_read) {
+    auto type = parse<ClientMessageType>(buffer, bytes_to_read);
+    if (!type)
+        return {};
+    ClientMessage result;
+    result.type = type.value();
+    if (type.value() == ClientMessageType::Join) {
+        auto name = parse<std::string>(buffer, bytes_to_read);
+        if (!name)
+            return {};
+        result.variant = name.value();
+    } else if (type.value() == ClientMessageType::Move) {
+        auto direction = parse<Direction>(buffer, bytes_to_read);
+        if (!direction)
+            return {};
+        result.variant = direction.value();
+    } else {
+        result.variant = std::monostate();
+    }
+    return result;
+}
+
 /* = = = = = *
  * SERIALIZE *
  * = = = = = */
@@ -652,6 +678,9 @@ bool serialize(ClientMessage to_serialize, char **buffer, size_t *bytes_to_write
 
 template<>
 bool serialize(DrawMessage to_serialize, char **buffer, size_t *bytes_to_write);
+
+template<>
+bool serialize(Event to_serialize, char **buffer, size_t *bytes_to_write);
 
 /* * * * * * * * * *
  * primitive types *
@@ -800,6 +829,117 @@ bool serialize(DrawMessage to_serialize, char **buffer, size_t *bytes_to_write) 
     else if (to_serialize.type == DrawMessageType::Game)
         return serialize(std::get<draw_message_game_t>(to_serialize.variant), buffer, bytes_to_write);
     assert(false);
+    return false;
+}
+
+template<>
+bool serialize(event_bomb_placed_t to_serialize, char **buffer, size_t *bytes_to_write) {
+    return serialize(to_serialize.id, buffer, bytes_to_write)
+        && serialize(to_serialize.position, buffer, bytes_to_write);
+}
+
+template<>
+bool serialize(event_bomb_exploded_t to_serialize, char **buffer, size_t *bytes_to_write) {
+    return serialize(to_serialize.id, buffer, bytes_to_write)
+        && serialize(to_serialize.robots_destroyed, buffer, bytes_to_write)
+        && serialize(to_serialize.blocks_destroyed, buffer, bytes_to_write);
+}
+
+template<>
+bool serialize(event_player_moved_t to_serialize, char **buffer, size_t *bytes_to_write) {
+    return serialize(to_serialize.id, buffer, bytes_to_write)
+           && serialize(to_serialize.position, buffer, bytes_to_write);
+}
+
+template<>
+bool serialize(event_block_placed_t to_serialize, char **buffer, size_t *bytes_to_write) {
+    return serialize(to_serialize.position, buffer, bytes_to_write);
+}
+
+template<>
+bool serialize(Event to_serialize, char **buffer, size_t *bytes_to_write) {
+    if (!serialize(to_serialize.type, buffer, bytes_to_write))
+        return false;
+    switch (to_serialize.type) {
+        case EventType::BombPlaced: {
+            return serialize(std::get<event_bomb_placed_t>(to_serialize.variant), buffer, bytes_to_write);
+            break;
+        }
+        case EventType::BombExploded: {
+            return serialize(std::get<event_bomb_exploded_t>(to_serialize.variant), buffer, bytes_to_write);
+            break;
+        }
+        case EventType::PlayerMoved: {
+            return serialize(std::get<event_player_moved_t>(to_serialize.variant), buffer, bytes_to_write);
+            break;
+        }
+        case EventType::BlockPlaced: {
+            return serialize(std::get<event_block_placed_t>(to_serialize.variant), buffer, bytes_to_write);
+            break;
+        }
+    }
+    return false;
+}
+
+template<>
+bool serialize(server_message_hello_t to_serialize, char **buffer, size_t *bytes_to_write) {
+    return serialize(to_serialize.server_name, buffer, bytes_to_write)
+           && serialize(to_serialize.players_count, buffer, bytes_to_write)
+           && serialize(to_serialize.size_x, buffer, bytes_to_write)
+           && serialize(to_serialize.size_y, buffer, bytes_to_write)
+           && serialize(to_serialize.game_length, buffer, bytes_to_write)
+           && serialize(to_serialize.explosion_radius, buffer, bytes_to_write)
+           && serialize(to_serialize.bomb_timer, buffer, bytes_to_write);
+}
+
+template<>
+bool serialize(server_message_accepted_player_t to_serialize, char **buffer, size_t *bytes_to_write) {
+    return serialize(to_serialize.id, buffer, bytes_to_write)
+           && serialize(to_serialize.player, buffer, bytes_to_write);
+}
+
+template<>
+bool serialize(server_message_game_started_t to_serialize, char **buffer, size_t *bytes_to_write) {
+    return serialize(to_serialize.players, buffer, bytes_to_write);
+}
+
+template<>
+bool serialize(server_message_turn_t to_serialize, char **buffer, size_t *bytes_to_write) {
+    return serialize(to_serialize.turn, buffer, bytes_to_write)
+           && serialize(to_serialize.events, buffer, bytes_to_write);
+}
+
+template<>
+bool serialize(server_message_game_ended_t to_serialize, char **buffer, size_t *bytes_to_write) {
+    return serialize(to_serialize.scores, buffer, bytes_to_write);
+}
+
+template<>
+bool serialize(ServerMessage to_serialize, char **buffer, size_t *bytes_to_write) {
+    if (!serialize(to_serialize.type, buffer, bytes_to_write))
+        return false;
+    switch (to_serialize.type) {
+        case ServerMessageType::Hello: {
+            return serialize(std::get<server_message_hello_t>(to_serialize.variant), buffer, bytes_to_write);
+            break;
+        }
+        case ServerMessageType::AcceptedPlayer: {
+            return serialize(std::get<server_message_accepted_player_t>(to_serialize.variant), buffer, bytes_to_write);
+            break;
+        }
+        case ServerMessageType::GameStarted: {
+            return serialize(std::get<server_message_game_started_t>(to_serialize.variant), buffer, bytes_to_write);
+            break;
+        }
+        case ServerMessageType::Turn: {
+            return serialize(std::get<server_message_turn_t>(to_serialize.variant), buffer, bytes_to_write);
+            break;
+        }
+        case ServerMessageType::GameEnded: {
+            return serialize(std::get<server_message_game_ended_t>(to_serialize.variant), buffer, bytes_to_write);
+            break;
+        }
+    }
     return false;
 }
 
