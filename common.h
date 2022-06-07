@@ -41,6 +41,7 @@ typedef uint32_t Score;
 typedef std::pair<uint16_t, uint16_t> Position; // <x, y>
 typedef std::pair<Position, uint16_t> Bomb; // <position, timer>
 typedef std::pair<std::string, std::string> Player; // <name, address>
+typedef uint16_t TurnNo;
 
 enum class EventType {
     BombPlaced = 0,
