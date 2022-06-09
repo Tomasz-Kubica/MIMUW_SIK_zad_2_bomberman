@@ -70,21 +70,14 @@ ClientMessage client_message_from_input_message(const InputMessage &input_messag
     exit(1);
 }
 
-template<typename T>
-void remove_from_vector(std::vector<T> &vec, const T &to_remove) {
-    auto found = std::find(vec.begin(), vec.end(), to_remove);
-    if (found != vec.end()) {
-        vec.erase(found);
-    }
-}
-
 class client_server {
 public:
     client_server(boost::asio::io_context &io_context, uint16_t receive_gui_port, const std::string &server_address,
                   const std::string &server_port,
                   const std::string &gui_address, const std::string &gui_port, const std::string &player_name)
-            : gui_socket_(io_context, udp::endpoint(udp::v6(), receive_gui_port)), server_socket_(io_context),
-              udp_resolver_(io_context), gui_address_(gui_address), gui_port_(gui_port), player_name(player_name) {
+            : udp_resolver_(io_context), gui_address_(gui_address), gui_port_(gui_port),
+            gui_socket_(io_context, udp::endpoint(udp::v6(), receive_gui_port)),
+            server_socket_(io_context), player_name(player_name) {
 
         tcp::resolver resolver(io_context);
         tcp::resolver::results_type server_endpoints;
@@ -483,7 +476,7 @@ int main(int argc, char *argv[]) {
 
     if (var_map.count("help")) {
         std::cout << description << "\n";
-        return 1;
+        return 0;
     }
 
     if (var_map.count("gui-address") == 0) {
