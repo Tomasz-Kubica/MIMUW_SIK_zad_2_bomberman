@@ -884,6 +884,7 @@ bool serialize(Event to_serialize, char **buffer, size_t *bytes_to_write) {
 
 template<>
 bool serialize(server_message_hello_t to_serialize, char **buffer, size_t *bytes_to_write) {
+    std::cerr << "serializing players count: " << to_serialize.players_count << '\n';
     return serialize(to_serialize.server_name, buffer, bytes_to_write)
            && serialize(to_serialize.players_count, buffer, bytes_to_write)
            && serialize(to_serialize.size_x, buffer, bytes_to_write)
@@ -942,6 +943,18 @@ bool serialize(ServerMessage to_serialize, char **buffer, size_t *bytes_to_write
         }
     }
     return false;
+}
+
+/* = = = = = = = = = *
+ * UTILITY FUNCTIONS *
+ * = = = = = = = = = */
+
+template<typename T>
+void remove_from_vector(std::vector<T> &vec, const T &to_remove) {
+    auto found = std::find(vec.begin(), vec.end(), to_remove);
+    if (found != vec.end()) {
+        vec.erase(found);
+    }
 }
 
 #endif //SIK_2022_COMMON_H
