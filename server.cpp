@@ -7,7 +7,6 @@
 #include <boost/enable_shared_from_this.hpp>
 #include <boost/asio.hpp>
 #include <queue>
-#include <bitset>
 
 #include "common.h"
 
@@ -196,11 +195,8 @@ private:
             const boost::system::error_code &error,
             std::size_t bytes_transferred) {
         if (error == boost::asio::error::eof) {
-            std::cerr << "Connection with client closed" << std::endl;
             return;
         } else if (error) {
-            std::cerr << "Error receiving message from client failed" << std::endl;
-            std::cerr << error.message() << std::endl;
             return;
         }
 
@@ -216,8 +212,6 @@ private:
                 break;
             } else if (!message) {
                 // Message was incorrect, disconnect
-                std::cerr << "Error: incorrect message from client" << std::endl;
-                // TODO close connection
                 return;
             }
             // Correct message
@@ -236,7 +230,6 @@ private:
                     return;
                 auto player_name = std::get<std::string>(message.variant);
                 Player player = {player_name, get_client_address()};
-                std::cerr << "get_client_address(): " << get_client_address() << std::endl;
                 player_id_ = next_player_id;
                 next_player_id++;
                 accepted_players.insert({
@@ -324,7 +317,6 @@ public:
     tcp_server(boost::asio::io_context& io_context)
             : io_context_(io_context),
               acceptor_(io_context, tcp::endpoint(tcp::v6(), port)) {
-        std::cerr << "Server waiting for incoming connections" << std::endl;
         start_accept();
     }
 
@@ -340,7 +332,6 @@ private:
 
     void handle_accept(player_connection::pointer new_connection, const boost::system::error_code& error) {
         if (!error) {
-            std::cerr << "New connection received" << std::endl;
             new_connection->start();
         }
 
@@ -364,12 +355,10 @@ void manage_game_state(boost::asio::io_context& io_context) {
             if (!is_game_played) { // wait until game starts
                 conditional_game_started.wait(lock, []{return accepted_players.size() == players_count;});
 
-                std::cerr << "game started" << std::endl;
 
                 is_game_played = true;
                 game_data = game_data_t(); // wyczyszczenie danych o grze
                 for (auto &player : accepted_players) {
-                    std::cerr << "  player: " << player.second.first << std::endl;
                     auto id = player.first;
                     auto x = uint16_t (get_nex_random() % size_x);
                     auto y = uint16_t (get_nex_random() % size_y);
@@ -391,13 +380,15 @@ void manage_game_state(boost::asio::io_context& io_context) {
                     auto x = uint16_t (get_nex_random() % size_x);
                     auto y = uint16_t (get_nex_random() % size_y);
                     Position position{x, y};
+                    if (game_data.blocks.contains(position))
+                        continue;
+                    game_data.blocks.insert(position);
                     events.push_back({
                         EventType::BlockPlaced,
                         event_block_placed_t({
                             position
                         })
                     });
-                    game_data.blocks.insert(position);
                 }
 
                 ServerMessage game_started_message({
@@ -410,8 +401,6 @@ void manage_game_state(boost::asio::io_context& io_context) {
 
             } else { // next turn
                 if (game_data.turn_no > game_length) { // game ended
-                    std::cerr << "game ended " << std::endl;
-
                     ServerMessage game_ended_message{
                         ServerMessageType::GameEnded,
                         server_message_game_ended_t{
@@ -427,8 +416,6 @@ void manage_game_state(boost::asio::io_context& io_context) {
                     next_player_id = 0;
                     continue;
                 }
-
-                std::cerr << "turn no " << game_data.turn_no << std::endl;
 
                 std::set<PlayerId> destroyed_players;
                 std::set<BombId> bombs_to_remove;
@@ -553,12 +540,6 @@ void manage_game_state(boost::asio::io_context& io_context) {
                                         })
                                     });
                                     player.second = new_position_verified; // update position in game data
-                                } else {
-                                    std::cerr << "move blocked\n";
-                                    if (game_data.blocks.contains(new_position))
-                                        std::cerr <<    "block\n";
-                                    else
-                                        std::cerr << "  out of range\n";
                                 }
                                 break;
                             }
@@ -637,25 +618,6 @@ int main(int argc, char *argv[]) {
                 bomb_timer
             })
     };
-//    std::cerr << "players_count: " << std::get<server_message_hello_t>(hello_message.variant).players_count << std::endl;
-//    char buff[BUFFER_SIZE];
-//    char *buff_ptr = buff;
-//    size_t size = BUFFER_SIZE;
-//    assert(serialize(hello_message, &buff_ptr, &size));
-//    buff_ptr = buff;
-//    size = BUFFER_SIZE;
-//    auto parsed = parse<ServerMessage>(&buff_ptr, &size);
-//    assert(parsed.has_value());
-//    assert(parsed.value().type == ServerMessageType::Hello);
-//    std::cerr << "parsed server_name: " << std::get<server_message_hello_t>(parsed.value().variant).server_name << std::endl;
-//    std::cerr << "parsed players_count: " << std::get<server_message_hello_t>(parsed.value().variant).players_count << std::endl;
-//    std::cerr << "parsed size_x: " << (int)std::get<server_message_hello_t>(parsed.value().variant).size_x << std::endl;
-//    std::cerr << "parsed size_y: " << (int)std::get<server_message_hello_t>(parsed.value().variant).size_y << std::endl;
-
-//    int a = 1;
-//    uint8_t b = 1;
-//    assert(a == (int)b);
-//    std::cerr << b << " " << std::bitset<32>(b) << "\n" << players_count << " " << std::bitset<32>(players_count) << "\n";
 
     boost::asio::io_context io_context;
     std::thread accepting_connections_thread(start_accepting_connections, std::ref(io_context));
